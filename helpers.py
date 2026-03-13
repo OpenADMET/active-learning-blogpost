@@ -1,6 +1,9 @@
 import numpy as np
 import tmap as tm
-import ugtm
+import torch
+import useful_rdkit_utils as uru
+from chemographykit.gtm import GTM
+from chemographykit.utils.molecules import calculate_latent_coords
 from lightning import pytorch as pl
 from mhfp.encoder import MHFPEncoder
 from openadmet.models.active_learning.committee import CommitteeRegressor
@@ -16,51 +19,98 @@ from scipy.spatial.distance import cdist
 from conf import STRATEGY_QUERY_KEYS
 
 
-def smiles_to_ecfp4(smiles_list, radius=2, n_bits=1024):
-    """Convert a list of SMILES to a binary ECFP4 fingerprint matrix."""
-    fps = []
-
-    # Initialize the generator (radius 2 is equivalent to ECFP4)
-    generator = Chem.rdFingerprintGenerator.GetMorganGenerator(
-        radius=radius, fpSize=n_bits
-    )
-
-    # Iterate over SMILES
-    for smi in smiles_list:
-        mol = Chem.MolFromSmiles(smi)
-
-        # Successfully parsed molecule → compute fingerprint
-        if mol is not None:
-            fp = generator.GetFingerprint(mol)
-            fps.append(list(fp))
-
-        # Fall back to an all-zero vector so the array stays rectangular
-        else:
-            fps.append([0] * n_bits)
-
-    return np.array(fps, dtype=np.float32)
-
-
 def smiles_to_gtm(
-    smiles_list, radius=2, n_bits=1024, k=16, m=4, s=0.3, regul=0.1, niter=200
+    smiles_list,
+    num_nodes=36**2,
+    num_basis_functions=31**2,
+    basis_width=5.726809,
+    reg_coeff=543.61223,
+    max_iter=300,
+    tolerance=0.001,
+    standardize=False,
+    seed=1234,
+    pca_scale=True,
+    device="cpu",
 ):
-    """Convert a list of SMILES to GTM coordinates."""
-    # Compute ECFP4 fingerprints
-    X_fp = smiles_to_ecfp4(smiles_list, radius=radius, n_bits=n_bits)
+    """
+    Fits a GTM (Generative Topographic Mapping) model to the given descriptors.
 
-    # Fit GTM on the fingerprints
-    gtm_model = ugtm.runGTM(
-        X_fp,
-        k=k,
-        m=m,
-        s=s,
-        regul=regul,
-        niter=niter,
-        verbose=False,
+    Parameters
+    ----------
+    desc : np.ndarray
+        Descriptor matrix (n_samples x n_features).
+    device : str or torch.device, optional
+        Device to use for computation.
+    num_nodes : int, optional
+        Number of grid nodes in GTM map.
+    num_basis_functions : int, optional
+        Number of basis functions for GTM.
+    basis_width : float, optional
+        Basis function width.
+    reg_coeff : float, optional
+        Regularization coefficient for GTM.
+    max_iter : int, optional
+        Maximum number of EM iterations.
+    tolerance : float, optional
+        EM convergence tolerance.
+    standardize : bool, optional
+        Whether to internally standardize descriptors.
+    seed : int, optional
+        Random seed for reproducibility.
+    pca_scale : bool, optional
+        Whether to scale using PCA during GTM initialization.
+    device : str or torch.device, optional
+        Device to use for GTM computations (e.g., "cpu", "cuda", "mps").
+
+    Returns
+    -------
+    gtm : GTM object
+        Trained GTM object.
+    crds_2d : np.ndarray
+        2D GTM projections for each sample.
+    resps : np.ndarray
+        GTM responsibilities for each sample (n_samples x n_nodes).
+    llhs : np.ndarray
+        Log-likelihoods for each sample.
+    """
+
+    # Calculate descriptors
+    rdkit_desc = uru.RDKitDescriptors()
+    X_desc = np.stack([rdkit_desc.calc_smiles(smi) for smi in smiles_list])
+
+    # Scale
+    X_desc, _ = uru.clean_and_scale_descriptors(X_desc)
+
+    # Initialize GTM
+    gtm = GTM(
+        num_nodes=num_nodes,
+        num_basis_functions=num_basis_functions,
+        basis_width=basis_width,
+        reg_coeff=reg_coeff,
+        max_iter=max_iter,
+        tolerance=tolerance,
+        standardize=standardize,
+        seed=seed,
+        device=device,
+        pca_scale=pca_scale,
     )
 
-    # Return the 2D posterior mean coordinates
-    return gtm_model
+    # Convert to tensor if needed
+    if not isinstance(X_desc, torch.Tensor):
+        X_desc = torch.tensor(X_desc, dtype=torch.float64, device=device)
+
+    # Git GTM model
+    gtm.fit_transform(X_desc)
+
+    # Get responsibilities and log-likelihoods
+    resps, llhs = gtm.project(X_desc)
+    resps = resps.detach().cpu().numpy()
+    llhs = llhs.detach().cpu().numpy()
+
+    # Calculate 2D coordinates from responsibilities
+    crds_2d = calculate_latent_coords(resps, correction=True, return_node=True)
+
+    return gtm, crds_2d, resps, llhs
 
 
 def smiles_to_tmap(
@@ -361,8 +411,7 @@ def run_active_learning(
     prev_labeled_mask = np.zeros(n_total, dtype=bool)
 
     # Precompute GTM coordinates for diversity-based strategy
-    gtm_model = smiles_to_gtm(df_pool["smiles"].tolist())
-    gtm_coords = gtm_model.matMeans
+    gtm_model, gtm_coords = smiles_to_gtm(df_pool["smiles"].tolist())
 
     for k in range(k_iter + 1):
         labeled_idx = np.where(labeled_mask)[0]
