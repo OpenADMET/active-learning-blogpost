@@ -1,8 +1,6 @@
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import seaborn as sns
 
 
 def plot_learning_curve_with_bands(
@@ -11,14 +9,35 @@ def plot_learning_curve_with_bands(
     ylabel: str,
     strategy_order: list[str],
     color_map: dict | None = None,
-    figsize=(8, 5),
-) -> plt.Figure:
+    width: int = 700,
+    height: int = 450,
+) -> go.Figure:
     """
-    Line plot with shaded ±1σ band per strategy.
-    DataFrame must have columns: strategy, n_labeled, {metric_col}_mean, {metric_col}_lower, {metric_col}_upper.
-    Uses matplotlib directly (no seaborn line functions for the band). Adds legend, axis labels, grid.
+    Interactive line plot with shaded ±1σ band per strategy.
+
+    DataFrame must have columns: strategy, n_labeled, {metric_col}_mean,
+    {metric_col}_lower, {metric_col}_upper.
+
+    Parameters
+    ----------
+    learning_curve_df : pd.DataFrame
+    metric_col : str
+        Base name of the metric; expects columns ``{metric_col}_mean``,
+        ``{metric_col}_lower``, and ``{metric_col}_upper``.
+    ylabel : str
+        Y-axis label.
+    strategy_order : list[str]
+        Strategies to plot, controls legend order.
+    color_map : dict or None, optional
+        Mapping of strategy name to CSS color string.
+    width, height : int, optional
+        Figure dimensions in pixels.
+
+    Returns
+    -------
+    go.Figure
     """
-    fig, ax = plt.subplots(figsize=figsize)
+    fig = go.Figure()
 
     for strategy in strategy_order:
         df_sub = learning_curve_df[
@@ -29,26 +48,54 @@ def plot_learning_curve_with_bands(
 
         color = color_map.get(strategy, None) if color_map else None
 
-        ax.plot(
-            df_sub["n_labeled"],
-            df_sub[f"{metric_col}_mean"],
-            label=strategy,
-            color=color,
-            linewidth=2,
+        # Upper bound — invisible line, anchors the fill
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub[f"{metric_col}_upper"],
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+                **({"line_color": color} if color else {}),
+            )
         )
-        ax.fill_between(
-            df_sub["n_labeled"],
-            df_sub[f"{metric_col}_lower"],
-            df_sub[f"{metric_col}_upper"],
-            color=color,
-            alpha=0.2,
+        # Lower bound — fills back to the upper bound
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub[f"{metric_col}_lower"],
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor=(
+                    _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
+                ),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        # Mean line
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub[f"{metric_col}_mean"],
+                mode="lines",
+                name=strategy,
+                line=dict(width=2, color=color),
+            )
         )
 
-    ax.set_xlabel("Number of Labeled Molecules")
-    ax.set_ylabel(ylabel)
-    ax.legend(title="Strategy")
-    ax.grid(True, linestyle="--", alpha=0.5)
-    sns.despine()
+    fig.update_layout(
+        xaxis_title="Number of Labeled Molecules",
+        yaxis_title=ylabel,
+        legend_title="Strategy",
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        plot_bgcolor="white",
+        width=width,
+        height=height,
+    )
     return fig
 
 
@@ -59,11 +106,12 @@ def plot_hit_discovery_curve(
     strategy_order: list[str],
     color_map: dict | None = None,
     value_col: str = "pEC50",
-    figsize=(8, 5),
-) -> plt.Figure:
+    width: int = 700,
+    height: int = 450,
+) -> go.Figure:
     """
-    Line plot of cumulative hits found in the labeled pool vs. number of labeled molecules,
-    with one line per strategy and a dashed reference line at the total hits available in the pool.
+    Interactive line plot of cumulative hits found vs. number of labeled molecules,
+    with one line per strategy and a dashed reference line at the max hits found.
 
     Parameters
     ----------
@@ -78,18 +126,16 @@ def plot_hit_discovery_curve(
     strategy_order : list[str]
         Strategies to plot, controls legend order.
     color_map : dict or None, optional
-        Mapping of strategy name to color. Falls back to matplotlib default if None.
+        Mapping of strategy name to CSS color string.
     value_col : str, optional
         Column name for the activity values used to define hits.
-    figsize : tuple, optional
-        Figure size passed to matplotlib.
+    width, height : int, optional
+        Figure dimensions in pixels.
 
     Returns
     -------
-    plt.Figure
-
+    go.Figure
     """
-    # Count hits per (strategy, iteration) and merge with n_labeled for the x-axis
     hits_per_iter = (
         pool_history_df.groupby(["strategy", "iteration"])[value_col]
         .apply(lambda s: (s >= hit_threshold).sum())
@@ -100,7 +146,6 @@ def plot_hit_discovery_curve(
     ].drop_duplicates()
     hits_df = hits_per_iter.merge(n_labeled, on=["strategy", "iteration"], how="left")
 
-    # Best-case reference: max hits found by any strategy at the final iteration
     last_iter = pool_history_df["iteration"].max()
     max_hits = int(
         pool_history_df[pool_history_df["iteration"] == last_iter]
@@ -109,36 +154,40 @@ def plot_hit_discovery_curve(
         .max()
     )
 
-    fig, ax = plt.subplots(figsize=figsize)
+    fig = go.Figure()
 
     for strategy in strategy_order:
         df_sub = hits_df[hits_df["strategy"] == strategy].sort_values("n_labeled")
         if df_sub.empty:
             continue
         color = color_map.get(strategy, None) if color_map else None
-        ax.plot(
-            df_sub["n_labeled"],
-            df_sub["n_hits"],
-            label=strategy,
-            color=color,
-            linewidth=2,
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["n_hits"],
+                mode="lines",
+                name=strategy,
+                line=dict(width=2, color=color),
+            )
         )
 
-    # Reference line showing the best any strategy achieved by the final iteration
-    ax.axhline(
-        max_hits,
-        color="black",
-        linestyle="--",
-        linewidth=1.2,
-        alpha=0.6,
-        label=f"Max hits found ({max_hits})",
+    fig.add_hline(
+        y=max_hits,
+        line=dict(color="black", width=1.2, dash="dash"),
+        annotation_text=f"Max hits found ({max_hits})",
+        annotation_position="top right",
     )
 
-    ax.set_xlabel("Number of Labeled Molecules")
-    ax.set_ylabel(f"Hits Found ({value_col} ≥ {hit_threshold})")
-    ax.legend(title="Strategy")
-    ax.grid(True, linestyle="--", alpha=0.5)
-    sns.despine()
+    fig.update_layout(
+        xaxis_title="Number of Labeled Molecules",
+        yaxis_title=f"Hits Found ({value_col} ≥ {hit_threshold})",
+        legend_title="Strategy",
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        plot_bgcolor="white",
+        width=width,
+        height=height,
+    )
     return fig
 
 
@@ -149,38 +198,97 @@ def plot_calibration_curve_before_after(
     observed_after: np.ndarray,
     label_before="Before calibration",
     label_after="After calibration",
-    figsize=(6, 6),
-) -> plt.Figure:
+    width: int = 500,
+    height: int = 500,
+) -> go.Figure:
     """
-    Plot diagonal (perfect calibration) + two calibration curves.
-    Fill between curve and diagonal to show miscalibration area. Legend with label strings.
+    Interactive plot of diagonal (perfect calibration) and two calibration curves.
+    Fills the area between each curve and the diagonal to show miscalibration.
+
+    Parameters
+    ----------
+    expected_before, observed_before : np.ndarray
+        Expected confidence levels and observed proportions before calibration.
+    expected_after, observed_after : np.ndarray
+        Expected confidence levels and observed proportions after calibration.
+    label_before, label_after : str
+        Legend labels for each calibration curve.
+    width, height : int, optional
+        Figure dimensions in pixels.
+
+    Returns
+    -------
+    go.Figure
     """
-    fig, ax = plt.subplots(figsize=figsize)
+    fig = go.Figure()
 
-    ax.plot([0, 1], [0, 1], "k--", label="Perfect calibration")
-
-    ax.plot(
-        expected_before, observed_before, label=label_before, color="#d62728", marker=""
-    )
-    ax.plot(
-        expected_after, observed_after, label=label_after, color="#2ca02c", marker=""
-    )
-
-    ax.fill_between(
-        expected_before, expected_before, observed_before, color="#d62728", alpha=0.1
-    )
-    ax.fill_between(
-        expected_after, observed_after, expected_after, alpha=0.1, color="#2ca02c"
+    # Perfect calibration diagonal
+    fig.add_trace(
+        go.Scatter(
+            x=[0, 1],
+            y=[0, 1],
+            mode="lines",
+            name="Perfect calibration",
+            line=dict(color="black", dash="dash", width=1.5),
+        )
     )
 
-    ax.set_xlabel("Expected Confidence Level")
-    ax.set_ylabel("Observed Proportion")
-    ax.set_title("Uncertainty Calibration")
-    ax.legend()
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.grid(True, linestyle=":", alpha=0.6)
+    # --- Before calibration ---
+    # Diagonal reference (invisible) used as fill anchor
+    fig.add_trace(
+        go.Scatter(
+            x=expected_before,
+            y=expected_before,
+            mode="lines",
+            line=dict(width=0),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=expected_before,
+            y=observed_before,
+            mode="lines",
+            name=label_before,
+            line=dict(color="#d62728", width=2),
+            fill="tonexty",
+            fillcolor="rgba(214,39,40,0.1)",
+        )
+    )
 
+    # --- After calibration ---
+    # Diagonal reference (invisible) used as fill anchor
+    fig.add_trace(
+        go.Scatter(
+            x=expected_after,
+            y=expected_after,
+            mode="lines",
+            line=dict(width=0),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=expected_after,
+            y=observed_after,
+            mode="lines",
+            name=label_after,
+            line=dict(color="#2ca02c", width=2),
+            fill="tonexty",
+            fillcolor="rgba(44,160,44,0.1)",
+        )
+    )
+
+    fig.update_layout(
+        title="Uncertainty Calibration",
+        xaxis=dict(title="Expected Confidence Level", range=[0, 1], showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
+        yaxis=dict(title="Observed Proportion", range=[0, 1], showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
+        plot_bgcolor="white",
+        width=width,
+        height=height,
+    )
     return fig
 
 
@@ -369,70 +477,102 @@ def plot_strategy_label_efficiency(
     target_mae: float,
     strategy_order: list[str],
     color_map: dict | None = None,
-    figsize=(8, 4),
-) -> plt.Figure:
+    width: int = 700,
+    height: int = 400,
+) -> go.Figure:
     """
-    Bar chart: number of labeled molecules required to first reach target_mae.
+    Interactive bar chart: number of labeled molecules required to first reach target_mae.
+
     DataFrame must have columns: strategy, n_labeled, mae_mean.
-    If strategy never reaches target, show a 'Did not reach' annotation.
-    Annotate bars with exact values.
+    Strategies that never reach the target are shown as hatched bars with a
+    "Did not reach" annotation.
+
+    Parameters
+    ----------
+    learning_curve_df : pd.DataFrame
+    target_mae : float
+    strategy_order : list[str]
+    color_map : dict or None, optional
+    width, height : int, optional
+        Figure dimensions in pixels.
+
+    Returns
+    -------
+    go.Figure
     """
-    fig, ax = plt.subplots(figsize=figsize)
-
-    efficiency = {}
-
     max_labeled = learning_curve_df["n_labeled"].max()
     sentinel_height = max_labeled * 1.05
+
+    bar_x, bar_y, bar_colors, bar_patterns, hover_texts = [], [], [], [], []
+    did_not_reach = []
 
     for strategy in strategy_order:
         df_sub = learning_curve_df[
             learning_curve_df["strategy"] == strategy
         ].sort_values("n_labeled")
-        # Find first row where mae_mean <= target_mae
         reached = df_sub[df_sub["mae_mean"] <= target_mae]
+        color = color_map.get(strategy, "steelblue") if color_map else "steelblue"
+
+        bar_x.append(strategy)
+        bar_colors.append(color)
+
         if not reached.empty:
-            efficiency[strategy] = reached.iloc[0]["n_labeled"]
+            val = int(reached.iloc[0]["n_labeled"])
+            bar_y.append(val)
+            bar_patterns.append("")
+            hover_texts.append(f"{val} labeled samples")
         else:
-            efficiency[strategy] = np.nan
+            bar_y.append(sentinel_height)
+            bar_patterns.append("/")
+            hover_texts.append("Did not reach target")
+            did_not_reach.append(strategy)
 
-    strategies = list(efficiency.keys())
-    values = list(efficiency.values())
+    fig = go.Figure(
+        go.Bar(
+            x=bar_x,
+            y=bar_y,
+            marker=dict(
+                color=bar_colors,
+                opacity=[0.4 if s in did_not_reach else 1.0 for s in bar_x],
+                pattern=dict(shape=bar_patterns, fgcolor="rgba(0,0,0,0.4)"),
+            ),
+            text=[
+                str(v) if s not in did_not_reach else ""
+                for s, v in zip(bar_x, bar_y)
+            ],
+            textposition="outside",
+            hovertext=hover_texts,
+            hoverinfo="x+text",
+        )
+    )
 
-    bars = []
-    for i, strategy in enumerate(strategies):
-        val = values[i]
-        color = color_map.get(strategy, "gray") if color_map else "steelblue"
+    for strategy in did_not_reach:
+        idx = bar_x.index(strategy)
+        fig.add_annotation(
+            x=strategy,
+            y=bar_y[idx] / 2,
+            text="Did not reach",
+            showarrow=False,
+            font=dict(color="black", size=11),
+            textangle=-90,
+        )
 
-        if np.isnan(val):
-            # Did not reach
-            bar = ax.bar(strategy, sentinel_height, color=color, alpha=0.4, hatch="///")
-            bars.append(bar[0])
-
-            # Annotate
-            ax.text(
-                bar[0].get_x() + bar[0].get_width() / 2,
-                sentinel_height / 2,
-                "Did not reach",
-                ha="center",
-                va="center",
-                color="black",
-                rotation=90,
-                fontweight="bold",
-            )
-        else:
-            # Reached
-            bar = ax.bar(strategy, val, color=color)
-            bars.append(bar[0])
-
-            # Annotate
-            ax.text(
-                bar[0].get_x() + bar[0].get_width() / 2,
-                val,
-                f"{int(val)}",
-                ha="center",
-                va="bottom",
-            )
-
-    ax.set_ylabel("Labeled Samples to Reach Target")
-    sns.despine()
+    fig.update_layout(
+        yaxis_title="Labeled Samples to Reach Target",
+        yaxis=dict(range=[0, sentinel_height * 1.15], showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
+        xaxis=dict(showgrid=False),
+        plot_bgcolor="white",
+        showlegend=False,
+        width=width,
+        height=height,
+    )
     return fig
+
+
+def _hex_to_rgba(hex_color: str, alpha: float) -> str:
+    """Convert a CSS hex color string to an rgba() string with the given alpha."""
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = "".join(c * 2 for c in hex_color)
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
