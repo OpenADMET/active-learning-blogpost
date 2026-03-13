@@ -1,6 +1,8 @@
 import numpy as np
+import tmap as tm
 import ugtm
 from lightning import pytorch as pl
+from mhfp.encoder import MHFPEncoder
 from openadmet.models.active_learning.committee import CommitteeRegressor
 from openadmet.models.architecture.chemprop import ChemPropModel
 from openadmet.models.eval.regression import RegressionMetrics
@@ -59,6 +61,71 @@ def smiles_to_gtm(
 
     # Return the 2D posterior mean coordinates
     return gtm_model
+
+
+def smiles_to_tmap(
+    smiles_list,
+    fp_size: int = 2048,
+    fp_radius: int = 3,
+    lsh_dim: int = 128,
+    k: int = 50,
+    sl_repeats: int = 2,
+    mmm_repeats: int = 2,
+    node_size: int = 1,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Compute a TMAP layout for a list of SMILES strings.
+
+    Encodes each molecule as an MHFP fingerprint, indexes all fingerprints
+    into an LSH forest, and runs ``tm.layout_from_lsh_forest`` to produce 2D
+    node coordinates and minimum-spanning-tree edges.
+
+    Parameters
+    ----------
+    smiles_list : list[str]
+        SMILES of compounds in the pool, in the same row order expected by
+        downstream consumers.
+    fp_size : int
+        MHFP fingerprint size (number of bits). Default 2048.
+    fp_radius : int
+        MHFP encoding radius. Default 3.
+    lsh_dim : int
+        Number of LSH permutations. Default 128.
+    k : int
+        Number of nearest neighbours used by the TMAP layout. Default 50.
+    sl_repeats, mmm_repeats : int
+        Layout refinement repetitions passed to ``tm.LayoutConfiguration``.
+    node_size : int
+        Node size hint for ``tm.LayoutConfiguration``.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ``(x, y, s, t)`` — node x-coordinates, node y-coordinates, edge
+        source indices, and edge target indices, all as numpy arrays of length
+        n_compounds (for x/y) or n_edges (for s/t).
+    """
+    enc = MHFPEncoder(fp_size, fp_radius)
+    lf = tm.LSHForest(fp_size, lsh_dim)
+
+    fps = []
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        if mol is not None:
+            fps.append(tm.VectorUint(enc.encode_mol(mol, min_radius=0)))
+        else:
+            fps.append(tm.VectorUint([0] * fp_size))
+
+    lf.batch_add(fps)
+    lf.index()
+
+    cfg = tm.LayoutConfiguration()
+    cfg.k = k
+    cfg.sl_repeats = sl_repeats
+    cfg.mmm_repeats = mmm_repeats
+    cfg.node_size = node_size
+
+    x, y, s, t, _ = tm.layout_from_lsh_forest(lf, config=cfg)
+    return np.array(x), np.array(y), np.array(s, dtype=int), np.array(t, dtype=int)
 
 
 def split_data(

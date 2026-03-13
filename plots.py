@@ -1,6 +1,11 @@
+import base64
+import io
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from rdkit import Chem
+from rdkit.Chem import Draw
 
 
 def plot_learning_curve_with_bands(
@@ -567,6 +572,264 @@ def plot_strategy_label_efficiency(
         height=height,
     )
     return fig
+
+
+def plot_tmap_selection_animation(
+    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    smiles_list: list[str],
+    selection_history: list[dict],
+    title: str = "Active Learning Selection (TMAP)",
+    img_size: tuple[int, int] = (200, 150),
+) -> go.Figure:
+    """
+    Animated Plotly scatter of compound selections on a pre-computed TMAP layout.
+
+    Renders one frame per active learning iteration with four layers:
+    the TMAP minimum-spanning-tree edges (gray, permanent background), all
+    pool nodes (light gray, permanent), accumulated prior selections (blue),
+    and the current-iteration selections (red). Molecule structures appear in
+    hover tooltips as embedded PNG images. Includes a slider and play/pause
+    controls for use directly in a Jupyter Notebook.
+
+    Parameters
+    ----------
+    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ``(x, y, s, t)`` as returned by ``helpers.smiles_to_tmap``:
+        node x-coordinates, node y-coordinates, MST edge source indices,
+        and MST edge target indices.
+    smiles_list : list[str]
+        SMILES strings in the same row order as the ``tmap_layout`` arrays.
+        Used to generate molecule-structure hover images.
+    selection_history : list[dict]
+        List of per-iteration state dicts produced by ``run_active_learning``.
+        Each dict must contain ``"selected_pool_indices"`` (list of integer
+        indices into the pool) and ``"iteration"`` (int).
+    title : str, optional
+        Title displayed above the plot.
+    img_size : tuple[int, int], optional
+        Width and height in pixels for each molecule thumbnail in the tooltip.
+
+    Returns
+    -------
+    go.Figure
+        Plotly figure with animation frames, a play/pause button, and an
+        iteration slider. Call ``fig.show()`` to render in a Jupyter Notebook.
+    """
+    x, y, s, t = tmap_layout
+    hover_imgs = _smiles_to_hover_images(smiles_list, img_size=img_size)
+
+    # Build a single edge trace with None separators (draws the MST as lines)
+    edge_x, edge_y = [], []
+    for src, dst in zip(s, t):
+        edge_x.extend([x[src], x[dst], None])
+        edge_y.extend([y[src], y[dst], None])
+
+    edge_trace = go.Scatter(
+        x=edge_x,
+        y=edge_y,
+        mode="lines",
+        line=dict(color="rgba(180,180,180,0.4)", width=0.5),
+        hoverinfo="skip",
+        showlegend=False,
+    )
+
+    pool_hover = [
+        f'<b>SMILES:</b> {smi}<br><img src="{img}">'
+        for smi, img in zip(smiles_list, hover_imgs)
+    ]
+
+    pool_trace = go.Scatter(
+        x=x,
+        y=y,
+        mode="markers",
+        marker=dict(color="lightgray", size=5, opacity=0.5),
+        name="All compounds",
+        text=pool_hover,
+        hovertemplate="%{text}<extra></extra>",
+    )
+
+    frames = []
+    slider_steps = []
+
+    for i, state in enumerate(selection_history):
+        current_idx = np.array(state["selected_pool_indices"], dtype=int)
+        prior_idx = np.array(
+            [idx for s_ in selection_history[:i] for idx in s_["selected_pool_indices"]],
+            dtype=int,
+        )
+
+        prior_hover = (
+            [f'<b>SMILES:</b> {smiles_list[j]}<br><img src="{hover_imgs[j]}">'
+             for j in prior_idx]
+            if len(prior_idx) > 0 else []
+        )
+        current_hover = [
+            f'<b>SMILES:</b> {smiles_list[j]}<br><img src="{hover_imgs[j]}">'
+            for j in current_idx
+        ]
+
+        frame = go.Frame(
+            data=[
+                # Trace index 2: accumulated prior selections (blue)
+                go.Scatter(
+                    x=x[prior_idx] if len(prior_idx) > 0 else np.array([]),
+                    y=y[prior_idx] if len(prior_idx) > 0 else np.array([]),
+                    mode="markers",
+                    marker=dict(color="royalblue", size=7, opacity=0.75),
+                    name="Prior selections",
+                    text=prior_hover,
+                    hovertemplate="%{text}<extra></extra>",
+                ),
+                # Trace index 3: current iteration selections (red)
+                go.Scatter(
+                    x=x[current_idx],
+                    y=y[current_idx],
+                    mode="markers",
+                    marker=dict(color="crimson", size=9, opacity=0.9),
+                    name=f"Iteration {state['iteration']}",
+                    text=current_hover,
+                    hovertemplate="%{text}<extra></extra>",
+                ),
+            ],
+            traces=[2, 3],
+            name=str(i),
+        )
+        frames.append(frame)
+
+        slider_steps.append(
+            dict(
+                method="animate",
+                args=[
+                    [str(i)],
+                    dict(
+                        frame=dict(duration=600, redraw=True),
+                        mode="immediate",
+                        transition=dict(duration=200),
+                    ),
+                ],
+                label=f"Iter {state['iteration']}",
+            )
+        )
+
+    fig = go.Figure(
+        data=[
+            # Trace 0: MST edges (permanent)
+            edge_trace,
+            # Trace 1: full compound pool background (gray, constant)
+            pool_trace,
+            # Trace 2: prior selections placeholder (overwritten by each frame)
+            go.Scatter(
+                x=np.array([]),
+                y=np.array([]),
+                mode="markers",
+                marker=dict(color="royalblue", size=7, opacity=0.75),
+                name="Prior selections",
+                hovertemplate="%{text}<extra></extra>",
+                text=[],
+            ),
+            # Trace 3: current selection placeholder (overwritten by each frame)
+            go.Scatter(
+                x=np.array([]),
+                y=np.array([]),
+                mode="markers",
+                marker=dict(color="crimson", size=9, opacity=0.9),
+                name="Current selection",
+                hovertemplate="%{text}<extra></extra>",
+                text=[],
+            ),
+        ],
+        frames=frames,
+        layout=go.Layout(
+            title=title,
+            xaxis=dict(title="TMAP dimension 1", showgrid=False, zeroline=False),
+            yaxis=dict(title="TMAP dimension 2", showgrid=False, zeroline=False),
+            legend=dict(itemsizing="constant"),
+            hovermode="closest",
+            updatemenus=[
+                dict(
+                    type="buttons",
+                    showactive=False,
+                    y=1.05,
+                    x=0.0,
+                    xanchor="left",
+                    yanchor="top",
+                    buttons=[
+                        dict(
+                            label="▶ Play",
+                            method="animate",
+                            args=[
+                                None,
+                                dict(
+                                    frame=dict(duration=600, redraw=True),
+                                    fromcurrent=True,
+                                    loop=True,
+                                    transition=dict(duration=200),
+                                ),
+                            ],
+                        ),
+                        dict(
+                            label="⏸ Pause",
+                            method="animate",
+                            args=[
+                                [None],
+                                dict(
+                                    frame=dict(duration=0, redraw=False),
+                                    mode="immediate",
+                                ),
+                            ],
+                        ),
+                    ],
+                )
+            ],
+            sliders=[
+                dict(
+                    active=0,
+                    currentvalue=dict(
+                        prefix="Active Learning — ", visible=True, xanchor="center"
+                    ),
+                    pad=dict(t=50),
+                    steps=slider_steps,
+                )
+            ],
+        ),
+    )
+
+    return fig
+
+
+def _smiles_to_hover_images(
+    smiles_list: list[str],
+    img_size: tuple[int, int] = (200, 150),
+) -> list[str]:
+    """Render each SMILES as a base64-encoded PNG data URI for hover tooltips.
+
+    Parameters
+    ----------
+    smiles_list : list[str]
+        SMILES strings to render.
+    img_size : tuple[int, int]
+        ``(width, height)`` in pixels for each rendered molecule image.
+
+    Returns
+    -------
+    list[str]
+        List of ``"data:image/png;base64,..."`` URI strings, one per input
+        SMILES. Invalid SMILES produce a 1×1 transparent PNG placeholder.
+    """
+    w, h = img_size
+    uris = []
+    for smi in smiles_list:
+        mol = Chem.MolFromSmiles(smi)
+        buf = io.BytesIO()
+        if mol is not None:
+            img = Draw.MolToImage(mol, size=(w, h))
+        else:
+            from PIL import Image
+            img = Image.new("RGBA", (w, h), (255, 255, 255, 0))
+        img.save(buf, format="PNG")
+        b64 = base64.b64encode(buf.getvalue()).decode()
+        uris.append(f"data:image/png;base64,{b64}")
+    return uris
 
 
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
