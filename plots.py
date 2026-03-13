@@ -1,11 +1,9 @@
-import base64
-import io
-
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from rdkit import Chem
-from rdkit.Chem import Draw
+import matplotlib.colors as mcolors
+import matplotlib.cm as mcm
+from faerun import Faerun
 
 
 def plot_learning_curve_with_bands(
@@ -288,8 +286,18 @@ def plot_calibration_curve_before_after(
 
     fig.update_layout(
         title="Uncertainty Calibration",
-        xaxis=dict(title="Expected Confidence Level", range=[0, 1], showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
-        yaxis=dict(title="Observed Proportion", range=[0, 1], showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
+        xaxis=dict(
+            title="Expected Confidence Level",
+            range=[0, 1],
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.1)",
+        ),
+        yaxis=dict(
+            title="Observed Proportion",
+            range=[0, 1],
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.1)",
+        ),
         plot_bgcolor="white",
         width=width,
         height=height,
@@ -300,17 +308,15 @@ def plot_calibration_curve_before_after(
 def plot_gtm_selection_animation(
     gtm_coords: np.ndarray,
     selection_history: list[dict],
-    smiles_list: list[str],
     title: str = "Active Learning Selection (GTM)",
-    img_size: tuple[int, int] = (200, 150),
+    background_gtm_coords: np.ndarray | None = None,
 ) -> go.Figure:
     """
     Animated Plotly scatter of compound selections on a pre-computed GTM embedding.
 
     Renders one frame per active learning iteration with three layers:
     gray background (full pool), blue accumulation (all prior selections),
-    and red highlight (current iteration's selections). Molecule structures
-    appear in hover tooltips as embedded PNG images. Includes a slider
+    and red highlight (current iteration's selections). Includes a slider
     and play/pause controls for use directly in a Jupyter Notebook.
 
     Parameters
@@ -323,33 +329,36 @@ def plot_gtm_selection_animation(
         Each dict must contain the key ``"selected_pool_indices"``, a list of
         integer indices into the pool corresponding to compounds selected that
         iteration.
-    smiles_list : list[str]
-        SMILES strings in the same row order as ``gtm_coords``. Used to
-        generate molecule-structure hover images.
     title : str, optional
         Title displayed above the plot.
-    img_size : tuple[int, int], optional
-        Width and height in pixels for each molecule thumbnail in the tooltip.
+    background_gtm_coords : np.ndarray or None, optional
+        Array of shape (n_bg, 2) with GTM coordinates for additional background
+        molecules not part of the active learning pool. When provided, these
+        points are merged into the static gray background trace and displayed
+        identically to unselected pool compounds (light gray, small).
 
     Returns
     -------
     go.Figure
         Plotly figure with animation frames, a play/pause button, and an
         iteration slider. Call ``fig.show()`` to render in a Jupyter Notebook.
-
     """
     n_pool = len(gtm_coords)
     all_idx = np.arange(n_pool)
-    hover_imgs = _smiles_to_hover_images(smiles_list, img_size=img_size)
 
-    # Build per-frame data: accumulated history (blue) and current selections (red)
+    # Merge background molecules into the gray layer (static, not animated)
+    if background_gtm_coords is not None:
+        bg_x = np.concatenate([gtm_coords[all_idx, 0], background_gtm_coords[:, 0]])
+        bg_y = np.concatenate([gtm_coords[all_idx, 1], background_gtm_coords[:, 1]])
+    else:
+        bg_x = gtm_coords[all_idx, 0]
+        bg_y = gtm_coords[all_idx, 1]
+
     frames = []
     slider_steps = []
 
     for i, state in enumerate(selection_history):
         current_idx = np.array(state["selected_pool_indices"], dtype=int)
-
-        # Accumulate all selections from prior iterations as historical context
         prior_idx = np.array(
             [idx for s in selection_history[:i] for idx in s["selected_pool_indices"]],
             dtype=int,
@@ -357,16 +366,6 @@ def plot_gtm_selection_animation(
 
         history_x = gtm_coords[prior_idx, 0] if len(prior_idx) > 0 else np.array([])
         history_y = gtm_coords[prior_idx, 1] if len(prior_idx) > 0 else np.array([])
-
-        prior_hover = (
-            [f'<b>SMILES:</b> {smiles_list[j]}<br><img src="{hover_imgs[j]}">'
-             for j in prior_idx]
-            if len(prior_idx) > 0 else []
-        )
-        current_hover = [
-            f'<b>SMILES:</b> {smiles_list[j]}<br><img src="{hover_imgs[j]}">'
-            for j in current_idx
-        ]
 
         frame = go.Frame(
             data=[
@@ -377,8 +376,6 @@ def plot_gtm_selection_animation(
                     mode="markers",
                     marker=dict(color="royalblue", size=7, opacity=0.75),
                     name="Prior selections",
-                    text=prior_hover,
-                    hovertemplate="%{text}<extra></extra>",
                 ),
                 # Trace index 2: current iteration selections (red)
                 go.Scatter(
@@ -387,11 +384,8 @@ def plot_gtm_selection_animation(
                     mode="markers",
                     marker=dict(color="crimson", size=9, opacity=0.9),
                     name=f"Iteration {state['iteration']}",
-                    text=current_hover,
-                    hovertemplate="%{text}<extra></extra>",
                 ),
             ],
-            # Only update the history and current traces; pool stays fixed
             traces=[1, 2],
             name=str(i),
         )
@@ -412,23 +406,16 @@ def plot_gtm_selection_animation(
             )
         )
 
-    pool_hover = [
-        f'<b>SMILES:</b> {smi}<br><img src="{img}">'
-        for smi, img in zip(smiles_list, hover_imgs)
-    ]
-
-    # Base figure: pool trace is always visible and never changes
     fig = go.Figure(
         data=[
             # Trace 0: full compound pool background (gray, constant)
             go.Scatter(
-                x=gtm_coords[all_idx, 0],
-                y=gtm_coords[all_idx, 1],
+                x=bg_x,
+                y=bg_y,
                 mode="markers",
                 marker=dict(color="lightgray", size=5, opacity=0.5),
                 name="All compounds",
-                text=pool_hover,
-                hovertemplate="%{text}<extra></extra>",
+                hoverinfo="skip",
             ),
             # Trace 1: prior selections placeholder (overwritten by each frame)
             go.Scatter(
@@ -437,8 +424,6 @@ def plot_gtm_selection_animation(
                 mode="markers",
                 marker=dict(color="royalblue", size=7, opacity=0.75),
                 name="Prior selections",
-                text=[],
-                hovertemplate="%{text}<extra></extra>",
             ),
             # Trace 2: current selection placeholder (overwritten by each frame)
             go.Scatter(
@@ -447,8 +432,6 @@ def plot_gtm_selection_animation(
                 mode="markers",
                 marker=dict(color="crimson", size=9, opacity=0.9),
                 name="Current selection",
-                text=[],
-                hovertemplate="%{text}<extra></extra>",
             ),
         ],
         frames=frames,
@@ -458,7 +441,6 @@ def plot_gtm_selection_animation(
             yaxis=dict(title="GTM dimension 2", showgrid=False, zeroline=False),
             legend=dict(itemsizing="constant"),
             hovermode="closest",
-            # Play/pause controls
             updatemenus=[
                 dict(
                     type="buttons",
@@ -511,359 +493,147 @@ def plot_gtm_selection_animation(
     return fig
 
 
-def plot_strategy_label_efficiency(
-    learning_curve_df: pd.DataFrame,
-    target_mae: float,
-    strategy_order: list[str],
-    color_map: dict | None = None,
-    width: int = 700,
-    height: int = 400,
-) -> go.Figure:
-    """
-    Interactive bar chart: number of labeled molecules required to first reach target_mae.
-
-    DataFrame must have columns: strategy, n_labeled, mae_mean.
-    Strategies that never reach the target are shown as hatched bars with a
-    "Did not reach" annotation.
-
-    Parameters
-    ----------
-    learning_curve_df : pd.DataFrame
-    target_mae : float
-    strategy_order : list[str]
-    color_map : dict or None, optional
-    width, height : int, optional
-        Figure dimensions in pixels.
-
-    Returns
-    -------
-    go.Figure
-    """
-    max_labeled = learning_curve_df["n_labeled"].max()
-    sentinel_height = max_labeled * 1.05
-
-    bar_x, bar_y, bar_colors, bar_patterns, hover_texts = [], [], [], [], []
-    did_not_reach = []
-
-    for strategy in strategy_order:
-        df_sub = learning_curve_df[
-            learning_curve_df["strategy"] == strategy
-        ].sort_values("n_labeled")
-        reached = df_sub[df_sub["mae_mean"] <= target_mae]
-        color = color_map.get(strategy, "steelblue") if color_map else "steelblue"
-
-        bar_x.append(strategy)
-        bar_colors.append(color)
-
-        if not reached.empty:
-            val = int(reached.iloc[0]["n_labeled"])
-            bar_y.append(val)
-            bar_patterns.append("")
-            hover_texts.append(f"{val} labeled samples")
-        else:
-            bar_y.append(sentinel_height)
-            bar_patterns.append("/")
-            hover_texts.append("Did not reach target")
-            did_not_reach.append(strategy)
-
-    fig = go.Figure(
-        go.Bar(
-            x=bar_x,
-            y=bar_y,
-            marker=dict(
-                color=bar_colors,
-                opacity=[0.4 if s in did_not_reach else 1.0 for s in bar_x],
-                pattern=dict(shape=bar_patterns, fgcolor="rgba(0,0,0,0.4)"),
-            ),
-            text=[
-                str(v) if s not in did_not_reach else ""
-                for s, v in zip(bar_x, bar_y)
-            ],
-            textposition="outside",
-            hovertext=hover_texts,
-            hoverinfo="x+text",
-        )
-    )
-
-    for strategy in did_not_reach:
-        idx = bar_x.index(strategy)
-        fig.add_annotation(
-            x=strategy,
-            y=bar_y[idx] / 2,
-            text="Did not reach",
-            showarrow=False,
-            font=dict(color="black", size=11),
-            textangle=-90,
-        )
-
-    fig.update_layout(
-        yaxis_title="Labeled Samples to Reach Target",
-        yaxis=dict(range=[0, sentinel_height * 1.15], showgrid=True, gridcolor="rgba(0,0,0,0.1)"),
-        xaxis=dict(showgrid=False),
-        plot_bgcolor="white",
-        showlegend=False,
-        width=width,
-        height=height,
-    )
-    return fig
-
-
-def plot_tmap_selection_animation(
+def plot_tmap_faerun(
     tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     smiles_list: list[str],
     selection_history: list[dict],
+    output_name: str = "tmap_selection",
+    output_path: str = "./",
     title: str = "Active Learning Selection (TMAP)",
-    img_size: tuple[int, int] = (200, 150),
-) -> go.Figure:
+    colormap: str = "viridis",
+    point_scale: float = 3.0,
+    n_background: int = 0,
+    background_point_scale: float = 1.0,
+) -> Faerun:
     """
-    Animated Plotly scatter of compound selections on a pre-computed TMAP layout.
+    Faerun scatter plot of compound selections on a pre-computed TMAP layout.
 
-    Renders one frame per active learning iteration with four layers:
-    the TMAP minimum-spanning-tree edges (gray, permanent background), all
-    pool nodes (light gray, permanent), accumulated prior selections (blue),
-    and the current-iteration selections (red). Molecule structures appear in
-    hover tooltips as embedded PNG images. Includes a slider and play/pause
-    controls for use directly in a Jupyter Notebook.
+    Each compound node is colored by the active learning iteration in which it
+    was first selected, using faerun's native categorical colormapping. Compounds
+    never selected are labeled ``"Unselected"``. SMILES strings are embedded as
+    labels for tooltip display. The TMAP minimum-spanning-tree is drawn as a tree
+    layer. Calling ``.plot()`` on the returned object renders the interactive HTML.
 
     Parameters
     ----------
     tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-        ``(x, y, s, t)`` as returned by ``helpers.smiles_to_tmap``:
-        node x-coordinates, node y-coordinates, MST edge source indices,
-        and MST edge target indices.
+        ``(x, y, s, t)`` as returned by ``helpers.smiles_to_tmap``, computed on
+        **all** molecules in the order ``pool_smiles + background_smiles``. When
+        ``n_background > 0`` the last ``n_background`` entries of x/y correspond
+        to background molecules; the MST edges (s, t) span all molecules so the
+        tree faithfully reflects the full chemical space.
     smiles_list : list[str]
-        SMILES strings in the same row order as the ``tmap_layout`` arrays.
-        Used to generate molecule-structure hover images.
+        SMILES strings in the same row order as ``tmap_layout`` (pool first, then
+        background). Shown as faerun labels / tooltips.
     selection_history : list[dict]
         List of per-iteration state dicts produced by ``run_active_learning``.
-        Each dict must contain ``"selected_pool_indices"`` (list of integer
-        indices into the pool) and ``"iteration"`` (int).
+        Each dict must contain ``"selected_pool_indices"`` (list of int into the
+        pool, i.e. indices ``0..len(smiles_list) - n_background - 1``) and
+        ``"iteration"`` (int).
+    output_name : str, optional
+        Base filename (without extension) for faerun's HTML output.
+    output_path : str, optional
+        Directory in which to write the output file.
     title : str, optional
-        Title displayed above the plot.
-    img_size : tuple[int, int], optional
-        Width and height in pixels for each molecule thumbnail in the tooltip.
+        Plot title.
+    colormap : str, optional
+        Matplotlib colormap name for categorical coloring. ``"viridis"`` is
+        the default; ``"tab20"`` works well when many iterations need distinct
+        hues.
+    point_scale : float, optional
+        Relative size of pool (foreground) scatter points. Default 3.0.
+    n_background : int, optional
+        Number of background molecules appended at the **end** of
+        ``tmap_layout`` / ``smiles_list``. These entries are displayed as gray
+        (``"Unselected"``) regardless of ``selection_history``. Default is 0
+        (no background molecules).
+
+        .. note::
+            Because TMAP computes a single global MST layout, background and
+            pool molecules must be embedded jointly. Compute coordinates with
+            ``helpers.smiles_to_tmap(pool_smiles + background_smiles)`` and
+            pass the full result as ``tmap_layout``.
+    background_point_scale : float, optional
+        Relative size of background scatter points. Default 1.0, smaller than
+        the foreground default so background molecules recede visually.
 
     Returns
     -------
-    go.Figure
-        Plotly figure with animation frames, a play/pause button, and an
-        iteration slider. Call ``fig.show()`` to render in a Jupyter Notebook.
+    Faerun
+        Configured faerun instance. Call ``f.plot(output_name, output_path)``
+        to regenerate the HTML, or ``f.plot(output_name, output_path,
+        notebook_height=500)`` to display inline in a Jupyter Notebook.
     """
     x, y, s, t = tmap_layout
-    hover_imgs = _smiles_to_hover_images(smiles_list, img_size=img_size)
 
-    # Build a single edge trace with None separators (draws the MST as lines)
-    edge_x, edge_y = [], []
-    for src, dst in zip(s, t):
-        edge_x.extend([x[src], x[dst], None])
-        edge_y.extend([y[src], y[dst], None])
-
-    edge_trace = go.Scatter(
-        x=edge_x,
-        y=edge_y,
-        mode="lines",
-        line=dict(color="rgba(180,180,180,0.4)", width=0.5),
-        hoverinfo="skip",
-        showlegend=False,
-    )
-
-    pool_hover = [
-        f'<b>SMILES:</b> {smi}<br><img src="{img}">'
-        for smi, img in zip(smiles_list, hover_imgs)
+    # Build iteration label per compound: index 0 = "Unselected", index k+1 = str(k)
+    iterations = sorted({state["iteration"] for state in selection_history})
+    # Category 0 is reserved for "Unselected"
+    iter_to_cat = {it: idx + 1 for idx, it in enumerate(iterations)}
+    legend_labels = [(0, "Unselected")] + [
+        (idx + 1, str(it)) for idx, it in enumerate(iterations)
     ]
 
-    pool_trace = go.Scatter(
-        x=x,
-        y=y,
-        mode="markers",
-        marker=dict(color="lightgray", size=5, opacity=0.5),
-        name="All compounds",
-        text=pool_hover,
-        hovertemplate="%{text}<extra></extra>",
+    # Pool molecules: colored by first-selected iteration; background molecules: gray (0)
+    c = np.zeros(len(x), dtype=int)
+    for state in selection_history:
+        cat = iter_to_cat[state["iteration"]]
+        for idx in state["selected_pool_indices"]:
+            if c[idx] == 0:  # keep the first iteration that selected this compound
+                c[idx] = cat
+
+    # Per-point sizes: foreground uses point_scale, background uses background_point_scale
+    n_pool = len(x) - n_background
+    s_vals = np.full(len(x), point_scale, dtype=float)
+    if n_background > 0:
+        s_vals[n_pool:] = background_point_scale
+
+    # Build a ListedColormap: gray for "Unselected" (index 0), then N viridis
+    # colors sampled across the full colormap range for each iteration category.
+    # Using a ListedColormap avoids the matplotlib integer-indexing issue where
+    # small integers (0, 1, 2…) all land at the dark end of continuous colormaps.
+    n_iter = len(iterations)
+    base_cmap = mcm.get_cmap(colormap) if isinstance(colormap, str) else colormap
+    iter_colors = [base_cmap(i / max(n_iter - 1, 1)) for i in range(n_iter)]
+    listed_cmap = mcolors.ListedColormap(
+        [(0.55, 0.55, 0.55, 1.0)] + iter_colors,
+        N=1 + n_iter,
     )
 
-    frames = []
-    slider_steps = []
-
-    for i, state in enumerate(selection_history):
-        current_idx = np.array(state["selected_pool_indices"], dtype=int)
-        prior_idx = np.array(
-            [idx for s_ in selection_history[:i] for idx in s_["selected_pool_indices"]],
-            dtype=int,
-        )
-
-        prior_hover = (
-            [f'<b>SMILES:</b> {smiles_list[j]}<br><img src="{hover_imgs[j]}">'
-             for j in prior_idx]
-            if len(prior_idx) > 0 else []
-        )
-        current_hover = [
-            f'<b>SMILES:</b> {smiles_list[j]}<br><img src="{hover_imgs[j]}">'
-            for j in current_idx
-        ]
-
-        frame = go.Frame(
-            data=[
-                # Trace index 2: accumulated prior selections (blue)
-                go.Scatter(
-                    x=x[prior_idx] if len(prior_idx) > 0 else np.array([]),
-                    y=y[prior_idx] if len(prior_idx) > 0 else np.array([]),
-                    mode="markers",
-                    marker=dict(color="royalblue", size=7, opacity=0.75),
-                    name="Prior selections",
-                    text=prior_hover,
-                    hovertemplate="%{text}<extra></extra>",
-                ),
-                # Trace index 3: current iteration selections (red)
-                go.Scatter(
-                    x=x[current_idx],
-                    y=y[current_idx],
-                    mode="markers",
-                    marker=dict(color="crimson", size=9, opacity=0.9),
-                    name=f"Iteration {state['iteration']}",
-                    text=current_hover,
-                    hovertemplate="%{text}<extra></extra>",
-                ),
-            ],
-            traces=[2, 3],
-            name=str(i),
-        )
-        frames.append(frame)
-
-        slider_steps.append(
-            dict(
-                method="animate",
-                args=[
-                    [str(i)],
-                    dict(
-                        frame=dict(duration=600, redraw=True),
-                        mode="immediate",
-                        transition=dict(duration=200),
-                    ),
-                ],
-                label=f"Iter {state['iteration']}",
-            )
-        )
-
-    fig = go.Figure(
-        data=[
-            # Trace 0: MST edges (permanent)
-            edge_trace,
-            # Trace 1: full compound pool background (gray, constant)
-            pool_trace,
-            # Trace 2: prior selections placeholder (overwritten by each frame)
-            go.Scatter(
-                x=np.array([]),
-                y=np.array([]),
-                mode="markers",
-                marker=dict(color="royalblue", size=7, opacity=0.75),
-                name="Prior selections",
-                hovertemplate="%{text}<extra></extra>",
-                text=[],
-            ),
-            # Trace 3: current selection placeholder (overwritten by each frame)
-            go.Scatter(
-                x=np.array([]),
-                y=np.array([]),
-                mode="markers",
-                marker=dict(color="crimson", size=9, opacity=0.9),
-                name="Current selection",
-                hovertemplate="%{text}<extra></extra>",
-                text=[],
-            ),
-        ],
-        frames=frames,
-        layout=go.Layout(
-            title=title,
-            xaxis=dict(title="TMAP dimension 1", showgrid=False, zeroline=False),
-            yaxis=dict(title="TMAP dimension 2", showgrid=False, zeroline=False),
-            legend=dict(itemsizing="constant"),
-            hovermode="closest",
-            updatemenus=[
-                dict(
-                    type="buttons",
-                    showactive=False,
-                    y=1.05,
-                    x=0.0,
-                    xanchor="left",
-                    yanchor="top",
-                    buttons=[
-                        dict(
-                            label="▶ Play",
-                            method="animate",
-                            args=[
-                                None,
-                                dict(
-                                    frame=dict(duration=600, redraw=True),
-                                    fromcurrent=True,
-                                    loop=True,
-                                    transition=dict(duration=200),
-                                ),
-                            ],
-                        ),
-                        dict(
-                            label="⏸ Pause",
-                            method="animate",
-                            args=[
-                                [None],
-                                dict(
-                                    frame=dict(duration=0, redraw=False),
-                                    mode="immediate",
-                                ),
-                            ],
-                        ),
-                    ],
-                )
-            ],
-            sliders=[
-                dict(
-                    active=0,
-                    currentvalue=dict(
-                        prefix="Active Learning — ", visible=True, xanchor="center"
-                    ),
-                    pad=dict(t=50),
-                    steps=slider_steps,
-                )
-            ],
-        ),
+    f = Faerun(
+        title=title,
+        clear_color="#111111",
+        coords=False,
+        view="front",
+        thumbnail_width=500,
     )
 
-    return fig
+    f.add_scatter(
+        "tmap",
+        {
+            "x": x,
+            "y": y,
+            "c": c,
+            "s": s_vals,
+            "labels": smiles_list,
+        },
+        colormap=listed_cmap,
+        categorical=True,
+        has_legend=True,
+        legend_title="AL Iteration",
+        legend_labels=legend_labels,
+        point_scale=1.0,
+        shader="smoothCircle",
+    )
 
+    f.add_tree(
+        "tmap_tree",
+        {"from": s, "to": t, "x": x, "y": y},
+        point_helper="tmap",
+    )
 
-def _smiles_to_hover_images(
-    smiles_list: list[str],
-    img_size: tuple[int, int] = (200, 150),
-) -> list[str]:
-    """Render each SMILES as a base64-encoded PNG data URI for hover tooltips.
-
-    Parameters
-    ----------
-    smiles_list : list[str]
-        SMILES strings to render.
-    img_size : tuple[int, int]
-        ``(width, height)`` in pixels for each rendered molecule image.
-
-    Returns
-    -------
-    list[str]
-        List of ``"data:image/png;base64,..."`` URI strings, one per input
-        SMILES. Invalid SMILES produce a 1×1 transparent PNG placeholder.
-    """
-    w, h = img_size
-    uris = []
-    for smi in smiles_list:
-        mol = Chem.MolFromSmiles(smi)
-        buf = io.BytesIO()
-        if mol is not None:
-            img = Draw.MolToImage(mol, size=(w, h))
-        else:
-            from PIL import Image
-            img = Image.new("RGBA", (w, h), (255, 255, 255, 0))
-        img.save(buf, format="PNG")
-        b64 = base64.b64encode(buf.getvalue()).decode()
-        uris.append(f"data:image/png;base64,{b64}")
-    return uris
+    f.plot(output_name, output_path, template="smiles")
+    return f
 
 
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
