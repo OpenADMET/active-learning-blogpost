@@ -1,3 +1,10 @@
+# Repo-specific
+results/
+_data/
+
+# MacOS
+.DS_Store
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
