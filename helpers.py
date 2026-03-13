@@ -105,6 +105,11 @@ def smiles_to_tmap(
         n_compounds (for x/y) or n_edges (for s/t).
     """
     enc = MHFPEncoder(fp_size, fp_radius)
+    # NumPy 2.0+ raises OverflowError when the Mersenne prime (2^61-1) used
+    # in mhfp's hash arithmetic is larger than the uint32 permutation arrays.
+    # Casting to uint64 gives enough headroom for the modular arithmetic.
+    enc.permutations_a = enc.permutations_a.astype(np.uint64)
+    enc.permutations_b = enc.permutations_b.astype(np.uint64)
     lf = tm.LSHForest(fp_size, lsh_dim)
 
     fps = []
