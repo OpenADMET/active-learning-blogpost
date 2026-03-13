@@ -300,14 +300,17 @@ def plot_calibration_curve_before_after(
 def plot_gtm_selection_animation(
     gtm_coords: np.ndarray,
     selection_history: list[dict],
+    smiles_list: list[str],
     title: str = "Active Learning Selection (GTM)",
+    img_size: tuple[int, int] = (200, 150),
 ) -> go.Figure:
     """
     Animated Plotly scatter of compound selections on a pre-computed GTM embedding.
 
     Renders one frame per active learning iteration with three layers:
     gray background (full pool), blue accumulation (all prior selections),
-    and red highlight (current iteration's selections). Includes a slider
+    and red highlight (current iteration's selections). Molecule structures
+    appear in hover tooltips as embedded PNG images. Includes a slider
     and play/pause controls for use directly in a Jupyter Notebook.
 
     Parameters
@@ -320,8 +323,13 @@ def plot_gtm_selection_animation(
         Each dict must contain the key ``"selected_pool_indices"``, a list of
         integer indices into the pool corresponding to compounds selected that
         iteration.
+    smiles_list : list[str]
+        SMILES strings in the same row order as ``gtm_coords``. Used to
+        generate molecule-structure hover images.
     title : str, optional
         Title displayed above the plot.
+    img_size : tuple[int, int], optional
+        Width and height in pixels for each molecule thumbnail in the tooltip.
 
     Returns
     -------
@@ -332,6 +340,7 @@ def plot_gtm_selection_animation(
     """
     n_pool = len(gtm_coords)
     all_idx = np.arange(n_pool)
+    hover_imgs = _smiles_to_hover_images(smiles_list, img_size=img_size)
 
     # Build per-frame data: accumulated history (blue) and current selections (red)
     frames = []
@@ -349,6 +358,16 @@ def plot_gtm_selection_animation(
         history_x = gtm_coords[prior_idx, 0] if len(prior_idx) > 0 else np.array([])
         history_y = gtm_coords[prior_idx, 1] if len(prior_idx) > 0 else np.array([])
 
+        prior_hover = (
+            [f'<b>SMILES:</b> {smiles_list[j]}<br><img src="{hover_imgs[j]}">'
+             for j in prior_idx]
+            if len(prior_idx) > 0 else []
+        )
+        current_hover = [
+            f'<b>SMILES:</b> {smiles_list[j]}<br><img src="{hover_imgs[j]}">'
+            for j in current_idx
+        ]
+
         frame = go.Frame(
             data=[
                 # Trace index 1: accumulated prior selections (blue)
@@ -358,6 +377,8 @@ def plot_gtm_selection_animation(
                     mode="markers",
                     marker=dict(color="royalblue", size=7, opacity=0.75),
                     name="Prior selections",
+                    text=prior_hover,
+                    hovertemplate="%{text}<extra></extra>",
                 ),
                 # Trace index 2: current iteration selections (red)
                 go.Scatter(
@@ -366,6 +387,8 @@ def plot_gtm_selection_animation(
                     mode="markers",
                     marker=dict(color="crimson", size=9, opacity=0.9),
                     name=f"Iteration {state['iteration']}",
+                    text=current_hover,
+                    hovertemplate="%{text}<extra></extra>",
                 ),
             ],
             # Only update the history and current traces; pool stays fixed
@@ -389,6 +412,11 @@ def plot_gtm_selection_animation(
             )
         )
 
+    pool_hover = [
+        f'<b>SMILES:</b> {smi}<br><img src="{img}">'
+        for smi, img in zip(smiles_list, hover_imgs)
+    ]
+
     # Base figure: pool trace is always visible and never changes
     fig = go.Figure(
         data=[
@@ -399,6 +427,8 @@ def plot_gtm_selection_animation(
                 mode="markers",
                 marker=dict(color="lightgray", size=5, opacity=0.5),
                 name="All compounds",
+                text=pool_hover,
+                hovertemplate="%{text}<extra></extra>",
             ),
             # Trace 1: prior selections placeholder (overwritten by each frame)
             go.Scatter(
@@ -407,6 +437,8 @@ def plot_gtm_selection_animation(
                 mode="markers",
                 marker=dict(color="royalblue", size=7, opacity=0.75),
                 name="Prior selections",
+                text=[],
+                hovertemplate="%{text}<extra></extra>",
             ),
             # Trace 2: current selection placeholder (overwritten by each frame)
             go.Scatter(
@@ -415,6 +447,8 @@ def plot_gtm_selection_animation(
                 mode="markers",
                 marker=dict(color="crimson", size=9, opacity=0.9),
                 name="Current selection",
+                text=[],
+                hovertemplate="%{text}<extra></extra>",
             ),
         ],
         frames=frames,
