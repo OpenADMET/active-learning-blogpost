@@ -1,16 +1,17 @@
 import numpy as np
 import ugtm
-from conf import STRATEGY_QUERY_KEYS
 from lightning import pytorch as pl
 from openadmet.models.active_learning.committee import CommitteeRegressor
 from openadmet.models.architecture.chemprop import ChemPropModel
 from openadmet.models.eval.regression import RegressionMetrics
 from openadmet.models.eval.uncertainty import UncertaintyMetrics
 from openadmet.models.features.chemprop import ChemPropFeaturizer
-from openadmet.models.split import ScaffoldSplitter
+from openadmet.models.split.scaffold import ScaffoldSplitter
 from openadmet.models.trainer.lightning import LightningTrainer
 from rdkit import Chem
 from scipy.spatial.distance import cdist
+
+from conf import STRATEGY_QUERY_KEYS
 
 
 def smiles_to_ecfp4(smiles_list, radius=2, n_bits=1024):
