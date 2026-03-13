@@ -15,10 +15,9 @@ This repository is a tutorial/blogpost on **active learning for pEC50 prediction
 
 ```
 active_learning_blog.ipynb   # Main notebook (the blogpost)
-scripts/
-  helpers.py                 # Core AL utilities: featurize, train_committee, run_active_learning, evaluate_on_test, smiles_to_ecfp4, smiles_to_gtm
-  conf.py                    # Global constants: STRATEGIES, STRATEGY_COLORS, STRATEGY_QUERY_KEYS
-  plots.py                   # All matplotlib/plotly plotting functions
+helpers.py                 # Core AL utilities: featurize, train_committee, run_active_learning, evaluate_on_test, smiles_to_ecfp4, smiles_to_gtm
+conf.py                    # Global constants: STRATEGIES, STRATEGY_COLORS, STRATEGY_QUERY_KEYS
+plots.py                   # All matplotlib/plotly plotting functions
 ```
 
 ## Key libraries and frameworks
