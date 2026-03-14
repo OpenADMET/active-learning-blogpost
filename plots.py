@@ -1,8 +1,8 @@
+import matplotlib.cm as mcm
+import matplotlib.colors as mcolors
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import matplotlib.colors as mcolors
-import matplotlib.cm as mcm
 from faerun import Faerun
 
 
@@ -18,12 +18,11 @@ def plot_learning_curve_with_bands(
     """
     Interactive line plot with shaded ±1σ band per strategy.
 
-    DataFrame must have columns: strategy, n_labeled, {metric_col}_mean,
-    {metric_col}_lower, {metric_col}_upper.
-
     Parameters
     ----------
     learning_curve_df : pd.DataFrame
+        Must have columns: ``strategy``, ``n_labeled``, ``{metric_col}_mean``,
+        ``{metric_col}_lower``, and ``{metric_col}_upper``.
     metric_col : str
         Base name of the metric; expects columns ``{metric_col}_mean``,
         ``{metric_col}_lower``, and ``{metric_col}_upper``.
@@ -368,8 +367,8 @@ def plot_gtm_selection_animation(
             dtype=int,
         )
 
-        history_x = gtm_coords[prior_idx, 0] if len(prior_idx) > 0 else np.array([])
-        history_y = gtm_coords[prior_idx, 1] if len(prior_idx) > 0 else np.array([])
+        history_x = gtm_coords[prior_idx, 0] if len(prior_idx) > 0 else [None]
+        history_y = gtm_coords[prior_idx, 1] if len(prior_idx) > 0 else [None]
 
         frame = go.Frame(
             data=[
@@ -378,16 +377,28 @@ def plot_gtm_selection_animation(
                     x=history_x,
                     y=history_y,
                     mode="markers",
-                    marker=dict(color="royalblue", size=7, opacity=0.75),
+                    marker=dict(
+                        color="royalblue",
+                        size=7,
+                        opacity=0.75,
+                        line=dict(color="white", width=0.5),
+                    ),
                     name="Prior selections",
+                    hoverinfo="skip",
                 ),
                 # Trace index 2: current iteration selections (red)
                 go.Scatter(
                     x=gtm_coords[current_idx, 0],
                     y=gtm_coords[current_idx, 1],
                     mode="markers",
-                    marker=dict(color="crimson", size=9, opacity=0.9),
-                    name=f"Iteration {state['iteration']}",
+                    marker=dict(
+                        color="crimson",
+                        size=9,
+                        opacity=0.9,
+                        line=dict(color="white", width=0.5),
+                    ),
+                    name="Current iteration",
+                    hoverinfo="skip",
                 ),
             ],
             traces=[1, 2],
@@ -406,7 +417,7 @@ def plot_gtm_selection_animation(
                         transition=dict(duration=200),
                     ),
                 ],
-                label=f"Iter {state['iteration']}",
+                label=str(state["iteration"]),
             )
         )
 
@@ -423,35 +434,49 @@ def plot_gtm_selection_animation(
             ),
             # Trace 1: prior selections placeholder (overwritten by each frame)
             go.Scatter(
-                x=np.array([]),
-                y=np.array([]),
+                x=[None],
+                y=[None],
                 mode="markers",
-                marker=dict(color="royalblue", size=7, opacity=0.75),
+                marker=dict(
+                    color="royalblue",
+                    size=7,
+                    opacity=0.75,
+                    line=dict(color="white", width=0.5),
+                ),
                 name="Prior selections",
+                hoverinfo="skip",
             ),
             # Trace 2: current selection placeholder (overwritten by each frame)
             go.Scatter(
-                x=np.array([]),
-                y=np.array([]),
+                x=[None],
+                y=[None],
                 mode="markers",
-                marker=dict(color="crimson", size=9, opacity=0.9),
+                marker=dict(
+                    color="crimson",
+                    size=9,
+                    opacity=0.9,
+                    line=dict(color="white", width=0.5),
+                ),
                 name="Current selection",
+                hoverinfo="skip",
             ),
         ],
         frames=frames,
         layout=go.Layout(
             title=title,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
             xaxis=dict(title="GTM dimension 1", showgrid=False, zeroline=False),
             yaxis=dict(title="GTM dimension 2", showgrid=False, zeroline=False),
             legend=dict(itemsizing="constant"),
-            hovermode="closest",
+            hovermode=False,
             updatemenus=[
                 dict(
                     type="buttons",
                     showactive=False,
-                    y=1.05,
-                    x=0.0,
-                    xanchor="left",
+                    y=0.85,
+                    x=1.2,
+                    xanchor="right",
                     yanchor="top",
                     buttons=[
                         dict(
@@ -485,8 +510,12 @@ def plot_gtm_selection_animation(
                 dict(
                     active=0,
                     currentvalue=dict(
-                        prefix="Active Learning — ", visible=True, xanchor="center"
+                        prefix="Iteration ",
+                        visible=True,
+                        xanchor="center",
+                        font=dict(color="black"),
                     ),
+                    font=dict(color="rgba(0,0,0,0)"),
                     pad=dict(t=50),
                     steps=slider_steps,
                 )
@@ -641,7 +670,21 @@ def plot_tmap_faerun(
 
 
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    """Convert a CSS hex color string to an rgba() string with the given alpha."""
+    """Convert a CSS hex color string to an ``rgba()`` string with the given alpha.
+
+    Parameters
+    ----------
+    hex_color : str
+        CSS hex color, with or without a leading ``#``. Both 3- and 6-digit
+        forms are accepted (e.g., ``"#abc"`` or ``"#aabbcc"``).
+    alpha : float
+        Opacity value in the range [0.0, 1.0].
+
+    Returns
+    -------
+    str
+        CSS ``rgba()`` string, e.g. ``"rgba(170,187,204,0.5)"``.
+    """
     hex_color = hex_color.lstrip("#")
     if len(hex_color) == 3:
         hex_color = "".join(c * 2 for c in hex_color)
