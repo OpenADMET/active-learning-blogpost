@@ -343,6 +343,10 @@ def plot_gtm_selection_animation(
         Plotly figure with animation frames, a play/pause button, and an
         iteration slider. Call ``fig.show()`` to render in a Jupyter Notebook.
     """
+    gtm_coords = np.asarray(gtm_coords)
+    if background_gtm_coords is not None:
+        background_gtm_coords = np.asarray(background_gtm_coords)
+
     n_pool = len(gtm_coords)
     all_idx = np.arange(n_pool)
 
