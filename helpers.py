@@ -16,7 +16,25 @@ from openadmet.models.trainer.lightning import LightningTrainer
 from rdkit import Chem
 from scipy.spatial.distance import cdist
 
-from conf import STRATEGY_QUERY_KEYS
+STRATEGIES = ["EI", "UCB", "Random", "Exploitation", "Exploration", "Diversity"]
+
+STRATEGY_COLORS = {
+    "EI": "#2d6a4f",
+    "UCB": "#1d3557",
+    "Random": "#e76f51",
+    "Exploitation": "#9b2226",
+    "Exploration": "#7b2d8b",
+    "Diversity": "#0077b6",
+}
+
+STRATEGY_QUERY_KEYS = {
+    "EI": "expected-improvement",
+    "UCB": "upper-confidence-bound",
+    "Random": None,
+    "Exploitation": "exploitation",
+    "Exploration": "max-uncertainty-reduction",
+    "Diversity": None,
+}
 
 
 def smiles_to_gtm(
@@ -33,45 +51,48 @@ def smiles_to_gtm(
     device="cpu",
 ):
     """
-    Fits a GTM (Generative Topographic Mapping) model to the given descriptors.
+    Fit a GTM (Generative Topographic Mapping) model to a list of SMILES strings.
+
+    Computes RDKit descriptors, scales them, then fits and projects a GTM model
+    to produce 2D coordinates and per-sample responsibilities.
 
     Parameters
     ----------
-    desc : np.ndarray
-        Descriptor matrix (n_samples x n_features).
-    device : str or torch.device, optional
-        Device to use for computation.
+    smiles_list : list[str]
+        SMILES strings for the molecules to embed.
     num_nodes : int, optional
-        Number of grid nodes in GTM map.
+        Number of grid nodes in the GTM map (total = sqrt(num_nodes) x sqrt(num_nodes)).
+        Default is 36**2.
     num_basis_functions : int, optional
-        Number of basis functions for GTM.
+        Number of RBF basis functions for GTM. Default is 31**2.
     basis_width : float, optional
-        Basis function width.
+        Width of each RBF basis function. Default is 5.726809.
     reg_coeff : float, optional
-        Regularization coefficient for GTM.
+        Regularization coefficient for GTM. Default is 543.61223.
     max_iter : int, optional
-        Maximum number of EM iterations.
+        Maximum number of EM iterations. Default is 300.
     tolerance : float, optional
-        EM convergence tolerance.
+        EM convergence tolerance. Default is 0.001.
     standardize : bool, optional
-        Whether to internally standardize descriptors.
+        Whether to internally standardize descriptors inside GTM. Default is False.
     seed : int, optional
-        Random seed for reproducibility.
+        Random seed for reproducibility. Default is 1234.
     pca_scale : bool, optional
-        Whether to scale using PCA during GTM initialization.
-    device : str or torch.device, optional
-        Device to use for GTM computations (e.g., "cpu", "cuda", "mps").
+        Whether to initialize the GTM grid using PCA scaling. Default is True.
+    device : str, optional
+        Device for GTM computations (e.g., ``"cpu"``, ``"cuda"``, ``"mps"``).
+        Default is ``"cpu"``.
 
     Returns
     -------
-    gtm : GTM object
-        Trained GTM object.
+    gtm : GTM
+        Fitted GTM model object.
     crds_2d : np.ndarray
-        2D GTM projections for each sample.
+        2D GTM projections of shape (n_samples, 2).
     resps : np.ndarray
-        GTM responsibilities for each sample (n_samples x n_nodes).
+        GTM responsibilities of shape (n_samples, num_nodes).
     llhs : np.ndarray
-        Log-likelihoods for each sample.
+        Per-sample log-likelihoods of shape (n_samples,).
     """
 
     # Calculate descriptors
@@ -99,7 +120,7 @@ def smiles_to_gtm(
     if not isinstance(X_desc, torch.Tensor):
         X_desc = torch.tensor(X_desc, dtype=torch.float64, device=device)
 
-    # Git GTM model
+    # Fit GTM model
     gtm.fit_transform(X_desc)
 
     # Get responsibilities and log-likelihoods
@@ -192,7 +213,39 @@ def split_data(
     test_size=0.1,
     random_state=42,
 ):
-    """Split data into train/val/test sets using scaffold splitting."""
+    """Split data into train/validation/test sets using scaffold splitting.
+
+    Parameters
+    ----------
+    X : array-like
+        Input features or SMILES strings passed to the scaffold splitter.
+    y : array-like
+        Target values corresponding to each entry in ``X``.
+    train_size : float, optional
+        Fraction of data to allocate to the training (pool) split. Default is 0.8.
+    val_size : float, optional
+        Fraction of data to allocate to the validation (calibration) split.
+        Default is 0.1.
+    test_size : float, optional
+        Fraction of data to allocate to the test split. Default is 0.1.
+    random_state : int, optional
+        Random seed for reproducibility. Default is 42.
+
+    Returns
+    -------
+    X_pool : array-like
+        Training/pool features.
+    X_cal : array-like
+        Validation/calibration features.
+    X_test : array-like
+        Test features.
+    y_pool : array-like
+        Training/pool targets.
+    y_cal : array-like
+        Validation/calibration targets.
+    y_test : array-like
+        Test targets.
+    """
     splitter = ScaffoldSplitter(
         train_size=train_size,
         val_size=val_size,
@@ -200,21 +253,57 @@ def split_data(
         random_state=random_state,
     )
 
-    # Split the data
-    # The splitter returns (X_train, X_val, X_test, y_train, y_val, y_test, groups)
     X_pool, X_cal, X_test, y_pool, y_cal, y_test, _ = splitter.split(X, y)
     return X_pool, X_cal, X_test, y_pool, y_cal, y_test
 
 
 def featurize(smiles_list, y_list=None, shuffle=False):
-    """Featurize SMILES for ChemProp."""
+    """Featurize a list of SMILES strings for use with ChemProp.
+
+    Parameters
+    ----------
+    smiles_list : list[str]
+        SMILES strings to featurize.
+    y_list : array-like or None, optional
+        Target values corresponding to each SMILES string. Pass ``None`` for
+        inference-only featurization. Default is None.
+    shuffle : bool, optional
+        Whether to shuffle the dataset when creating the data loader.
+        Default is False.
+
+    Returns
+    -------
+    loader : DataLoader
+        PyTorch data loader ready for model training or inference.
+    scaler : object
+        Fitted target scaler (used to inverse-transform predictions).
+    """
     featurizer = ChemPropFeaturizer(batch_size=64, shuffle=shuffle)
     loader, indices, scaler, dataset = featurizer.featurize(smiles_list, y_list)
     return loader, scaler
 
 
 def build_committee_member(seed=42, max_epochs=20, log_dir=False):
-    """Constructs a single ChemPropModel member with a LightningTrainer."""
+    """Construct a single ChemProp committee member paired with a LightningTrainer.
+
+    Parameters
+    ----------
+    seed : int, optional
+        Random seed passed to ``pl.seed_everything`` for full reproducibility
+        across model weights and data-loader shuffling. Default is 42.
+    max_epochs : int, optional
+        Maximum number of training epochs for the LightningTrainer. Default is 20.
+    log_dir : str or False, optional
+        Output directory for training logs and checkpoints. Pass ``False`` (or
+        ``None``) to disable logging. Default is False.
+
+    Returns
+    -------
+    model : ChemPropModel
+        Initialized (but untrained) ChemProp model.
+    trainer : LightningTrainer
+        Configured trainer linked to ``model``.
+    """
 
     pl.seed_everything(seed, workers=True)
 
@@ -241,7 +330,7 @@ def build_committee_member(seed=42, max_epochs=20, log_dir=False):
     trainer = LightningTrainer(
         output_dir=log_dir,
         max_epochs=max_epochs,
-        accelerator="gpu",  # Use "gpu" if available
+        accelerator="gpu",
         devices=1,
         early_stopping=False,
         gradient_clip_val=0.5,
@@ -253,7 +342,30 @@ def build_committee_member(seed=42, max_epochs=20, log_dir=False):
 
 
 def train_committee(smiles_labeled, y_labeled, n_models=5, seed=42, max_epochs=20):
-    """Train N_MODELS committee members on bootstrapped data."""
+    """Train a committee of ChemProp models on bootstrapped data.
+
+    Each committee member is trained on a bootstrap resample of the labeled set,
+    providing ensemble-based uncertainty estimates via prediction disagreement.
+
+    Parameters
+    ----------
+    smiles_labeled : pd.Series or list[str]
+        SMILES strings for the labeled training compounds.
+    y_labeled : pd.Series or np.ndarray
+        Target values corresponding to each labeled compound.
+    n_models : int, optional
+        Number of committee members to train. Default is 5.
+    seed : int, optional
+        Base random seed; each member uses ``seed + i`` for reproducibility.
+        Default is 42.
+    max_epochs : int, optional
+        Maximum training epochs per committee member. Default is 20.
+
+    Returns
+    -------
+    committee : CommitteeRegressor
+        Assembled committee of trained ChemProp models.
+    """
     members = []
     rng = np.random.RandomState(seed)
 
@@ -295,7 +407,7 @@ def query_batch(
     labeled_gtm_coords=None,
 ):
     """
-    Select M_QUERY molecules from the unlabeled pool.
+    Select a batch of molecules from the unlabeled pool using the given acquisition strategy.
 
     Parameters
     ----------
@@ -304,21 +416,28 @@ def query_batch(
     smiles_unlabeled : list[str]
         SMILES of unlabeled candidates.
     strategy : str
-        Acquisition strategy name.
+        Acquisition strategy name. One of ``"EI"``, ``"UCB"``, ``"Random"``,
+        ``"Exploitation"``, ``"Exploration"``, or ``"Diversity"``.
     best_y : float
-        Best observed label seen so far (used by EI/PI).
-    seed : int
-        RNG seed for the random strategy.
-    unlabeled_gtm_coords : np.ndarray or None
+        Best observed label seen so far (used by EI).
+    size : int, optional
+        Number of compounds to select. Default is 100.
+    seed : int, optional
+        RNG seed for the random strategy. Default is 42.
+    unlabeled_gtm_coords : np.ndarray or None, optional
         GTM (x, y) coordinates for the unlabeled pool; required for Diversity.
-    labeled_gtm_coords : np.ndarray or None
+        Default is None.
+    labeled_gtm_coords : np.ndarray or None, optional
         GTM (x, y) coordinates for the current labeled set; required for Diversity.
+        Default is None.
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray | None]
-        Selected indices (relative to unlabeled pool) and acquisition scores (or None).
-
+    top_indices : np.ndarray
+        Selected indices relative to the unlabeled pool.
+    scores : np.ndarray or None
+        Acquisition scores for each selected compound, or ``None`` for the
+        random strategy.
     """
     n_unlabeled = len(smiles_unlabeled)
 
@@ -331,9 +450,8 @@ def query_batch(
         return selected_idx, None
 
     if strategy == "Diversity":
-        # Max-min diversity: pick the M compounds with the greatest minimum
+        # Max-min diversity: pick the compounds with the greatest minimum
         # Euclidean distance to any already-labeled compound in GTM space.
-        # This maximises structural dissimilarity between successive batches.
         dists = cdist(unlabeled_gtm_coords, labeled_gtm_coords, metric="euclidean")
         min_dists = dists.min(axis=1)  # nearest labeled neighbor for each candidate
         top_indices = np.argsort(min_dists)[::-1][:size]
@@ -342,11 +460,9 @@ def query_batch(
     # Prepare unlabeled data for prediction
     X_featurized, _ = featurize(smiles_unlabeled)
 
-    # Get acquisition scores
-    # Note: query() returns scores, we must argsort to get indices
+    # Get acquisition scores from the committee
     qs_key = STRATEGY_QUERY_KEYS[strategy]
 
-    # Fix kwargs for EI/PI
     scores = committee.query(
         X_featurized, query_strategy=qs_key, best_y=best_y, xi=0.01
     )
@@ -354,14 +470,37 @@ def query_batch(
     # Flatten scores before ranking
     scores_1d = np.asarray(scores).ravel()
 
-    # Select top M (descending order)
+    # Select top compounds in descending order
     top_indices = np.argsort(scores_1d)[::-1][:size]
 
     return top_indices, scores_1d
 
 
 def evaluate_on_test(committee, smiles_test, y_test):
-    """Evaluate committee on held-out test set."""
+    """Evaluate a committee regressor on a held-out test set.
+
+    Parameters
+    ----------
+    committee : CommitteeRegressor
+        Trained committee model to evaluate.
+    smiles_test : list[str] or pd.Series
+        SMILES strings for the test compounds.
+    y_test : array-like
+        Ground-truth target values for the test compounds.
+
+    Returns
+    -------
+    results : dict
+        Dictionary containing the following keys:
+
+        - ``"mae"`` : float — mean absolute error.
+        - ``"r2"`` : float — coefficient of determination.
+        - ``"ktau"`` : float — Kendall's tau rank correlation.
+        - ``"spearmanr"`` : float — Spearman rank correlation.
+        - ``"miscal_area"`` : float — miscalibration area.
+        - ``"y_test_pred"`` : np.ndarray — predicted mean values.
+        - ``"y_test_std"`` : np.ndarray — predicted standard deviations.
+    """
     X_featurized, _ = featurize(smiles_test)
     y_test_arr = np.array(y_test).reshape(-1, 1)
 
@@ -394,13 +533,51 @@ def evaluate_on_test(committee, smiles_test, y_test):
 def run_active_learning(
     df_pool, df_test, n_start=100, k_iter=15, seed=42, strategy="Random", verbose=True
 ):
-    """Execute full AL loop for one strategy and seed."""
+    """Execute a full active learning loop for one strategy and seed.
+
+    Starts with a random initial labeled subset, then iteratively queries the
+    unlabeled pool and re-trains the committee for ``k_iter`` rounds. Evaluates
+    on the held-out test set after each iteration and records full state history.
+
+    Parameters
+    ----------
+    df_pool : pd.DataFrame
+        Candidate pool with columns ``"smiles"`` and ``"pEC50"``.
+    df_test : pd.DataFrame
+        Held-out test set with columns ``"smiles"`` and ``"pEC50"``.
+    n_start : int, optional
+        Number of randomly selected compounds in the initial labeled set.
+        Default is 100.
+    k_iter : int, optional
+        Number of active learning iterations after the initial training.
+        Default is 15.
+    seed : int, optional
+        Base random seed for both initial selection and subsequent queries.
+        Default is 42.
+    strategy : str, optional
+        Acquisition strategy to use. One of ``"EI"``, ``"UCB"``, ``"Random"``,
+        ``"Exploitation"``, ``"Exploration"``, or ``"Diversity"``.
+        Default is ``"Random"``.
+    verbose : bool, optional
+        Whether to print progress after each iteration. Default is True.
+
+    Returns
+    -------
+    dict
+        Dictionary with the following keys:
+
+        - ``"history"`` : list[dict] — per-iteration state records, each
+          containing iteration index, labeled count, best observed value,
+          pool activity values, selected indices, and test metrics.
+        - ``"committee"`` : CommitteeRegressor — committee trained on the
+          final labeled set.
+    """
     # Initialize labeled pool with random subset
     rng = np.random.RandomState(seed)
     n_total = len(df_pool)
     all_indices = np.arange(n_total)
 
-    # Start with N_START labeled indices
+    # Initialize the labeled mask using the starting indices
     initial_idx = rng.choice(all_indices, size=n_start, replace=False)
     labeled_mask = np.zeros(n_total, dtype=bool)
     labeled_mask[initial_idx] = True
