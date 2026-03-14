@@ -109,6 +109,7 @@ def smiles_to_gtm(
 
     # Calculate 2D coordinates from responsibilities
     crds_2d = calculate_latent_coords(resps, correction=True, return_node=True)
+    crds_2d = crds_2d.values
 
     return gtm, crds_2d, resps, llhs
 
