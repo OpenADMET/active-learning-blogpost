@@ -2,7 +2,7 @@
 
 ## Project overview
 
-This repository is a tutorial/blogpost on **active learning for pEC50 prediction** in drug discovery, focused on PXR (pregnane X receptor) inhibition. The main artifact is `active_learning_blog.ipynb`, a self-contained Jupyter notebook that walks through a full active learning benchmark using real experimental data.
+This repository is a tutorial/blogpost on **active learning for pEC50 prediction** in drug discovery, focused on PXR (pregnane X receptor) inhibition. The primary artifact is `blogpost.md`, a prose document that narrates the full active learning benchmark. All executable code lives in `src/`, with two entry points at the repository root.
 
 ## Domain context
 
@@ -14,13 +14,24 @@ This repository is a tutorial/blogpost on **active learning for pEC50 prediction
 ## Repository structure
 
 ```
-active_learning_blog.ipynb        # Main notebook (the blogpost)
-helpers.py                        # Core AL utilities and module-level constants
-plots.py                          # All Plotly/Faerun plotting functions
-results/                          # HTML outputs (tmap_selection.html, GTM animation HTMLs)
+blogpost.md                       # Primary document (the blogpost, prose + figure links)
+run.py                            # Entry point 1: run the AL pipeline → results/all_runs.pkl
+analysis.py                       # Entry point 2: consume results/all_runs.pkl → all HTML figures
+src/
+    __init__.py
+    helpers.py                    # Core AL utilities and module-level constants
+    plots.py                      # All Plotly/Faerun plotting functions
+_data/
+    octant_screening_compounds.csv
+results/                          # Generated artifacts (HTML figures, pkl checkpoint)
 ```
 
-There is no separate `conf.py`. The constants `STRATEGIES`, `STRATEGY_COLORS`, and `STRATEGY_QUERY_KEYS` are defined at the top of `helpers.py` and imported directly from there.
+There is no separate `conf.py`. The constants `STRATEGIES`, `STRATEGY_COLORS`, and `STRATEGY_QUERY_KEYS` are defined at the top of `src/helpers.py` and imported directly from there.
+
+### Entry points
+
+- **`run.py`** — loads the dataset, scaffold-splits, fits the GTM embedding, runs `run_active_learning` for every strategy, and checkpoints everything (AL results + GTM coords + split DataFrames + config) to `results/all_runs.pkl`. Resumes from partial checkpoints automatically.
+- **`analysis.py`** — loads `results/all_runs.pkl`, unpacks results into tidy DataFrames, and writes all interactive HTML figures to `results/`. No access to the original dataset is needed.
 
 ## Key libraries and frameworks
 
@@ -53,7 +64,7 @@ There is no separate `conf.py`. The constants `STRATEGIES`, `STRATEGY_COLORS`, a
 - **Loop**: `run_active_learning(df_pool, df_test, n_start, k_iter, seed, strategy)` runs `K_ITER=15` iterations starting from `N_START=100` labeled molecules
 - **Calibration**: isotonic regression post-hoc calibration on a held-out calibration set (`df_cal`); visualized with `plot_calibration_curve_before_after`
 
-## Helper functions (`helpers.py`)
+## Helper functions (`src/helpers.py`)
 
 | Function | Purpose |
 |---|---|
@@ -67,7 +78,7 @@ There is no separate `conf.py`. The constants `STRATEGIES`, `STRATEGY_COLORS`, a
 | `evaluate_on_test(committee, smiles_test, y_test)` | Return dict of MAE, R², Kendall τ, Spearman ρ, miscalibration area |
 | `run_active_learning(df_pool, df_test, ...)` | Full AL loop; return `{"history": [...], "committee": ...}` |
 
-## Plotting functions (`plots.py`)
+## Plotting functions (`src/plots.py`)
 
 | Function | Output |
 |---|---|
@@ -80,9 +91,10 @@ There is no separate `conf.py`. The constants `STRATEGIES`, `STRATEGY_COLORS`, a
 ## Coding conventions
 
 - Python 3.10+, type hints encouraged for function signatures
-- All helper functions live in `helpers.py` at the repo root; all plot functions in `plots.py`
-- Constants (`STRATEGIES`, `STRATEGY_COLORS`, `STRATEGY_QUERY_KEYS`) are defined in `helpers.py` — import them from there, not from a separate config file
-- Keep notebook cells focused: configuration → data loading → GTM/TMAP embedding → AL loop → results unpacking → visualization → calibration
+- All helper functions live in `src/helpers.py`; all plot functions in `src/plots.py`
+- Entry points (`run.py`, `analysis.py`) are at the repository root and import from `src`
+- Constants (`STRATEGIES`, `STRATEGY_COLORS`, `STRATEGY_QUERY_KEYS`) are defined in `src/helpers.py` — import them from there, not from a separate config file
+- The blogpost narrative lives entirely in `blogpost.md`; `run.py` and `analysis.py` contain all executable code
 - Use `STRATEGY_COLORS` for consistent strategy colors across all plots
 - Prefer scaffold-based splits over random splits when evaluating generalization
 - Docstrings follow NumPy style
