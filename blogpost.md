@@ -133,9 +133,9 @@ Run `python analysis.py` to regenerate all figures. They are written to `results
 
 ### Learning curves
 
-*[View interactive figure: Learning curves — MAE](results/learning_curve_mae.html)*
+[![Learning curves — MAE (click for interactive version)](results/learning_curve_mae.png)](results/learning_curve_mae.html)
 
-*[View interactive figure: Learning curves — Kendall's τ](results/learning_curve_ktau.html)*
+[![Learning curves — Kendall's τ (click for interactive version)](results/learning_curve_ktau.png)](results/learning_curve_ktau.html)
 
 As expected, **EI** and **UCB** outperform **Random** sampling significantly in the early iterations (100–250 labeled molecules). The gap narrows as the pool grows, but the "area under the learning curve" advantage for active learning is substantial.
 
@@ -149,7 +149,7 @@ Crucially, even at $N=100$, the MAE is reasonable (~0.7–0.8), thanks to CheMel
 
 ### Hit discovery
 
-*[View interactive figure: Hit discovery curve](results/hit_discovery_curve.html)*
+[![Hit discovery curve (click for interactive version)](results/hit_discovery_curve.png)](results/hit_discovery_curve.html)
 
 ## Navigating chemical space with GTM
 
@@ -163,9 +163,9 @@ We reuse the GTM embedding (fit before the active learning loop) for visualizati
 
 Use the slider to step through iterations manually, or press **▶ Play** to watch the campaign unfold.
 
-*[View interactive figure: GTM selection animation (Exploitation)](results/gtm_selection_animation_exploitation.html)*
+[![Exploitation compound selection in GTM chemical space — final state colored by iteration (click for interactive animation)](results/gtm_selection_animation_exploitation.png)](results/gtm_selection_animation_exploitation.html)
 
-*[View interactive figure: TMAP chemical space (EI)](results/tmap_selection.html)*
+[![Active learning selection in TMAP chemical space, EI strategy (click for interactive version)](results/tmap_selection.png)](results/tmap_selection.html)
 
 ## Are our uncertainties trustworthy?
 
@@ -173,7 +173,7 @@ A model with good MAE can still be overconfident. In active learning, this is da
 
 We evaluate calibration using the **miscalibration area**. A perfectly calibrated model has e.g. 90% of data points falling within its 90% confidence interval. We can improve this post-hoc using **scaling factor** calibration on a small holdout set (`df_cal`). `analysis.py` takes the final EI committee, calibrates it on `df_cal`, and re-evaluates on `df_test`.
 
-*[View interactive figure: Calibration curve (before / after)](results/calibration_curve.html)*
+[![Uncertainty calibration curve before and after scaling-factor calibration (click for interactive version)](results/calibration_curve.png)](results/calibration_curve.html)
 
 The plot shows how scaling-factor calibration pulls the calibration curve closer to the diagonal. For early-stage AL, this ensures that the acquisition function (which relies on $\sigma$) is making decisions based on realistic uncertainty estimates, preventing the model from ignoring "unknown unknowns."
 
