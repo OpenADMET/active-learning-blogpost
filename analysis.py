@@ -1,18 +1,19 @@
 #!/usr/bin/env python
 """Analysis and visualization entry point.
 
-Loads the active learning results from ``results/all_runs.pkl`` (produced by
-``run.py``) and generates all figures referenced in ``blogpost.md``.
+Loads ``results/setup.pkl`` and all ``results/run_*.pkl`` files produced by
+``run.py``, performs sanity checks on coverage and consistency, then generates
+all figures referenced in ``blogpost.md``.
 
 Usage
 -----
     python analysis.py
 
-Generated outputs (written to ``results/``):
+Generated outputs (written to ``results/``)::
     learning_curve_mae.html / .png            — MAE learning curves per strategy
-    learning_curve_ktau.html / .png           — Kendall's τ learning curves per strategy
+    learning_curve_ktau.html / .png           — Kendall’s τ learning curves per strategy
     hit_discovery_curve.html / .png           — cumulative hits vs. labeled-pool size
-    gtm_selection_animation_exploitation.html / .png — animated GTM selection (Exploitation)
+    gtm_selection_animation_exploitation.html / .png — animated GTM (Exploitation)
     tmap_selection.html / .png                — interactive TMAP (EI, via Faerun)
     calibration_curve.html / .png             — before/after isotonic calibration
 
@@ -20,10 +21,10 @@ Requires ``kaleido`` for PNG export (``pip install kaleido``).
 """
 
 import asyncio
-import copy
 import logging
 import os
 import pickle
+import re
 import warnings
 from pathlib import Path
 
@@ -40,11 +41,9 @@ import uncertainty_toolbox as uct
 from kaleido import Kaleido
 
 import src.plots as alp
+from src.config import ALConfig
 from src.helpers import (
-    STRATEGIES,
     STRATEGY_COLORS,
-    evaluate_on_test,
-    featurize,
     smiles_to_tmap,
 )
 
@@ -52,53 +51,140 @@ warnings.filterwarnings("ignore")
 
 
 def main() -> None:
-    # ── Load results ───────────────────────────────────────────────────────────
-    pkl_path = Path("results/all_runs.pkl")
-
-    if not pkl_path.exists():
+    # ── Load setup ─────────────────────────────────────────────────────────────
+    setup_path = Path("results/setup.pkl")
+    if not setup_path.exists():
         raise FileNotFoundError(
-            "results/all_runs.pkl not found. Run `python run.py` first."
+            "results/setup.pkl not found. Run `python run.py --setup-only` first."
+        )
+    with open(setup_path, "rb") as fh:
+        setup = pickle.load(fh)
+
+    df_pool = setup["df_pool"]
+    df_test = setup["df_test"]
+    df_seed = setup.get("df_seed")
+    gtm_coords_pool = setup["gtm_coords_pool"]
+    gtm_coords_background = setup["gtm_coords_background"]
+    background_smiles = setup["background_smiles"]
+    cfg: ALConfig = setup["config"]
+
+    if df_seed is not None:
+        print(
+            f"External seed data: {len(df_seed)} compounds "
+            "(used in training, not counted in n_labeled on learning curves)."
         )
 
-    with open(pkl_path, "rb") as fh:
-        data = pickle.load(fh)
+    # ── Load per-job results ───────────────────────────────────────────────────
+    pattern = re.compile(r"^run_(.+)_seed(\d+)\.pkl$")
+    job_results: dict[tuple[str, int], dict] = {}
 
-    all_runs = data["all_runs"]
-    df_pool = data["df_pool"]
-    df_cal = data["df_cal"]
-    df_test = data["df_test"]
-    gtm_coords_pool = data["gtm_coords_pool"]
-    gtm_coords_background = data["gtm_coords_background"]
-    background_smiles = data["background_smiles"]
+    for pkl_file in sorted(Path("results").glob("run_*.pkl")):
+        m = pattern.match(pkl_file.name)
+        if not m:
+            continue
+        strat, seed = m.group(1), int(m.group(2))
+        with open(pkl_file, "rb") as fh:
+            job_data = pickle.load(fh)
+        job_results[(strat, seed)] = job_data["result"]
 
-    print(f"Loaded results for strategies: {list(all_runs.keys())}")
+    if not job_results:
+        raise FileNotFoundError(
+            "No results/run_*.pkl files found. "
+            "Run `python run.py` (or individual jobs) first."
+        )
+
+    # ── Sanity checks ──────────────────────────────────────────────────────────
+    warned = False
+
+    # 1. Strategy coverage
+    missing_strategies = [
+        s for s in cfg.strategies if not any(k[0] == s for k in job_results)
+    ]
+    if missing_strategies:
+        print(f"WARNING: Missing strategies entirely: {missing_strategies}")
+        warned = True
+
+    # 2. Seeds per strategy and cross-strategy seed-count consistency
+    seeds_per_strategy: dict[str, list[int]] = {
+        s: sorted(seed for (strat, seed) in job_results if strat == s)
+        for s in cfg.strategies
+    }
+    present_counts = {s: len(v) for s, v in seeds_per_strategy.items() if v}
+    unique_counts = set(present_counts.values())
+
+    print("\nSeed coverage:")
+    for s in cfg.strategies:
+        n = len(seeds_per_strategy[s])
+        seeds_str = str(seeds_per_strategy[s]) if n else "[]"
+        print(f"  {s:<14} {n} seed(s): {seeds_str}")
+
+    if len(unique_counts) > 1:
+        print(
+            f"WARNING: Seed count mismatch across strategies — "
+            f"counts are {present_counts}. Learning curve bands may be inconsistent."
+        )
+        warned = True
+
+    # 3. Iteration-count consistency (each run should have k_iter+1 steps)
+    steps_per_run = {
+        (strat, seed): len(result["history"])
+        for (strat, seed), result in job_results.items()
+    }
+    unique_step_counts = set(steps_per_run.values())
+    if len(unique_step_counts) > 1:
+        print("WARNING: Iteration count differs across runs:")
+        for (strat, seed), n in sorted(steps_per_run.items()):
+            print(f"  {strat} seed={seed}: {n} iterations")
+        warned = True
+    else:
+        print(f"\nIterations per run: {next(iter(unique_step_counts))}")
+
+    if not warned:
+        print("Sanity checks passed.")
+
+    # ── Assemble all_runs ──────────────────────────────────────────────────────
+    all_runs: dict[str, list] = {}
+    for strategy in cfg.strategies:
+        runs = [
+            {"seed": seed, **job_results[(strategy, seed)]}
+            for seed in seeds_per_strategy[strategy]
+        ]
+        if runs:
+            all_runs[strategy] = runs
+
+    print(f"\nStrategies loaded: {list(all_runs.keys())}")
 
     # ── Unpack into tidy DataFrames ───────────────────────────────────────────────
     records = []
     pool_history_records = []
 
-    for strategy in STRATEGIES:
-        run_data = all_runs[strategy]["history"]
-        for step in run_data:
-            records.append(
-                {
-                    "strategy": strategy,
-                    "iteration": step["iteration"],
-                    "n_labeled": step["n_labeled"],
-                    "mae": step["mae"],
-                    "r2": step["r2"],
-                    "ktau": step["ktau"],
-                    "spearmanr": step["spearmanr"],
-                }
-            )
-            for pval in step["pool_y_values"]:
-                pool_history_records.append(
+    for strategy in cfg.strategies:
+        if strategy not in all_runs:
+            continue
+        for run in all_runs[strategy]:
+            seed = run["seed"]
+            for step in run["history"]:
+                records.append(
                     {
                         "strategy": strategy,
+                        "seed": seed,
                         "iteration": step["iteration"],
-                        "pEC50": float(pval),
+                        "n_labeled": step["n_labeled"],
+                        "mae": step["mae"],
+                        "r2": step["r2"],
+                        "ktau": step["ktau"],
+                        "spearmanr": step["spearmanr"],
                     }
                 )
+                for pval in step["pool_y_values"]:
+                    pool_history_records.append(
+                        {
+                            "strategy": strategy,
+                            "seed": seed,
+                            "iteration": step["iteration"],
+                            "pEC50": float(pval),
+                        }
+                    )
 
     learning_curve_long = pd.DataFrame(records)
     pool_history_long = pd.DataFrame(pool_history_records)
@@ -107,19 +193,30 @@ def main() -> None:
         f"Pool history rows: {len(pool_history_long)}"
     )
 
-    # Single-run: keep mean/lower/upper schema for downstream plotting compatibility
+    # Aggregate across seeds — mean ± std per (strategy, n_labeled).
+    # When only one seed is present std=NaN → filled to 0 (no band).
     learning_curve_summary = (
-        learning_curve_long[["strategy", "n_labeled", "mae", "ktau", "r2"]]
-        .rename(columns={"mae": "mae_mean", "ktau": "ktau_mean", "r2": "r2_mean"})
-        .copy()
+        learning_curve_long.groupby(["strategy", "n_labeled"])
+        .agg(
+            mae_mean=("mae", "mean"),
+            mae_std=("mae", "std"),
+            ktau_mean=("ktau", "mean"),
+            ktau_std=("ktau", "std"),
+            r2_mean=("r2", "mean"),
+            r2_std=("r2", "std"),
+        )
+        .reset_index()
+        .fillna(0)
     )
     for metric in ["mae", "ktau", "r2"]:
-        learning_curve_summary[f"{metric}_lower"] = learning_curve_summary[
-            f"{metric}_mean"
-        ]
-        learning_curve_summary[f"{metric}_upper"] = learning_curve_summary[
-            f"{metric}_mean"
-        ]
+        learning_curve_summary[f"{metric}_lower"] = (
+            learning_curve_summary[f"{metric}_mean"]
+            - learning_curve_summary[f"{metric}_std"]
+        )
+        learning_curve_summary[f"{metric}_upper"] = (
+            learning_curve_summary[f"{metric}_mean"]
+            + learning_curve_summary[f"{metric}_std"]
+        )
 
     Path("results").mkdir(exist_ok=True)
 
@@ -133,7 +230,7 @@ def main() -> None:
         learning_curve_summary,
         metric_col="mae",
         ylabel="MAE (pEC50 units)",
-        strategy_order=STRATEGIES,
+        strategy_order=cfg.strategies,
         color_map=STRATEGY_COLORS,
     )
     fig.write_html("results/learning_curve_mae.html")
@@ -144,7 +241,7 @@ def main() -> None:
         learning_curve_summary,
         metric_col="ktau",
         ylabel="Kendall's τ",
-        strategy_order=STRATEGIES,
+        strategy_order=cfg.strategies,
         color_map=STRATEGY_COLORS,
     )
     fig.write_html("results/learning_curve_ktau.html")
@@ -152,11 +249,15 @@ def main() -> None:
 
     # ── Hit discovery curve ────────────────────────────────────────────────────────
     print("Generating hit discovery curve...")
+    # Pin to the first seed: plot_hit_discovery_curve groups by (strategy, iteration)
+    # and counts hits, so mixing seeds would inflate counts by N_seeds.
+    _vis_seed = all_runs[cfg.strategies[0]][0]["seed"]
+    pool_history_vis = pool_history_long[pool_history_long["seed"] == _vis_seed]
     fig = alp.plot_hit_discovery_curve(
-        pool_history_long,
+        pool_history_vis,
         learning_curve_long,
         hit_threshold=7.0,
-        strategy_order=STRATEGIES,
+        strategy_order=cfg.strategies,
         color_map=STRATEGY_COLORS,
     )
     fig.write_html("results/hit_discovery_curve.html")
@@ -168,7 +269,7 @@ def main() -> None:
     fig = alp.plot_gtm_selection_animation(
         gtm_coords=gtm_coords_pool,
         background_gtm_coords=gtm_coords_background,
-        selection_history=all_runs[_method]["history"],
+        selection_history=all_runs[_method][0]["history"],
         title=f"{_method} Compound Selection in GTM Chemical Space",
     )
     fig.update_layout(autosize=False, width=800, height=800)
@@ -178,7 +279,7 @@ def main() -> None:
 
     # Static snapshot: final-state scatter colored by iteration
     print(f"Generating static GTM snapshot ({_method})...")
-    _gtm_history = all_runs[_method]["history"]
+    _gtm_history = all_runs[_method][0]["history"]
     _gtm_iters = sorted({s["iteration"] for s in _gtm_history})
     _iter_to_cat = {it: idx + 1 for idx, it in enumerate(_gtm_iters)}
     _n_iter = len(_gtm_iters)
@@ -247,7 +348,7 @@ def main() -> None:
         tmap_layout,
         n_background=len(background_smiles),
         smiles_list=df_pool["smiles"].values,
-        selection_history=all_runs["EI"]["history"],
+        selection_history=all_runs["EI"][0]["history"],
         point_scale=3,
         background_point_scale=1,
         title="Active Learning Selection (TMAP)",
@@ -258,7 +359,7 @@ def main() -> None:
     # Static TMAP snapshot colored by AL iteration
     print("Generating static TMAP snapshot...")
     _tx, _ty, _ts, _tt = tmap_layout
-    _ei_history = all_runs["EI"]["history"]
+    _ei_history = all_runs["EI"][0]["history"]
     _ei_iters = sorted({s["iteration"] for s in _ei_history})
     _ei_iter_to_cat = {it: idx + 1 for idx, it in enumerate(_ei_iters)}
     _n_ei_iter = len(_ei_iters)
@@ -295,38 +396,27 @@ def main() -> None:
     plt.close(fig_tmap_static)
 
     # ── Calibration ────────────────────────────────────────────────────────────────
-    committee_final = all_runs["EI"]["committee"]
-
-    print("Evaluating *before* calibration...")
-    res_pre = evaluate_on_test(committee_final, df_test["smiles"], df_test["pEC50"])
-
-    y_cal_arr = df_cal["pEC50"].values.reshape(-1, 1)
-    X_cal_loader, _ = featurize(df_cal["smiles"].values)
-
-    print("Calibrating...")
-    committee_calibrated = copy.deepcopy(committee_final)
-    committee_calibrated.calibrate_uncertainty(
-        X_cal_loader, y_cal_arr, method="scaling-factor"
-    )
-
-    print("Evaluating *after* calibration...")
-    res_post = evaluate_on_test(
-        committee_calibrated, df_test["smiles"], df_test["pEC50"]
-    )
+    # Calibration is performed per-iteration inside run_active_learning.
+    # Visualize before/after using stored predictions from the final EI iteration.
+    final_state = all_runs["EI"][0]["history"][-1]
 
     exp_pre, obs_pre = uct.metrics_calibration.get_proportion_lists_vectorized(
-        res_pre["y_test_pred"], res_pre["y_test_std"], df_test["pEC50"].values
+        final_state["y_test_pred_pre_cal"],
+        final_state["y_test_std_pre_cal"],
+        df_test["pEC50"].values,
     )
     exp_post, obs_post = uct.metrics_calibration.get_proportion_lists_vectorized(
-        res_post["y_test_pred"], res_post["y_test_std"], df_test["pEC50"].values
+        final_state["y_test_pred"],
+        final_state["y_test_std"],
+        df_test["pEC50"].values,
     )
 
     fig = alp.plot_calibration_curve_before_after(exp_pre, obs_pre, exp_post, obs_post)
     fig.write_html("results/calibration_curve.html")
     _plotly_pngs.append((fig, "results/calibration_curve.png"))
 
-    print(f"\nMiscalibration Area Before: {res_pre['miscal_area']:.4f}")
-    print(f"Miscalibration Area After:  {res_post['miscal_area']:.4f}")
+    print(f"\nMiscalibration Area Before: {final_state['miscal_area_pre_cal']:.4f}")
+    print(f"Miscalibration Area After:  {final_state['miscal_area']:.4f}")
 
     # ── Batch PNG export (single kaleido process) ──────────────────────────────────
     print(f"\nExporting {len(_plotly_pngs)} Plotly figures to PNG...")

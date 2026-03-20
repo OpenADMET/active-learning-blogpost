@@ -1,0 +1,41 @@
+data:
+  # Path to the main labelled dataset (Parquet format).
+  dataset_path: ~/repos/skunkworks/chemprop_mve/datasets/pxr/pxr_combined_canonical.parquet
+
+  # Path to the background/context compound library for GTM and TMAP visualisations.
+  # These molecules are never used for training — they provide visual chemical-space context.
+  background_path: _data/octant_screening_compounds.csv
+
+  # Column in the background file that contains SMILES strings.
+  background_smiles_col: Smiles
+
+  # Optional external seed training dataset. Set to null to skip.
+  # These compounds are always included in the training set at every AL iteration
+  # and are never queried or evaluated.
+  seed_data_path: null
+  seed_smiles_col: smiles
+  seed_activity_col: pEC50
+
+active_learning:
+  # Subset of strategies to run. Valid options:
+  # EI, UCB, Random, Exploitation, Exploration, Diversity
+  strategies:
+    - EI
+    - UCB
+    - Random
+    - Exploitation
+    - Exploration
+    - Diversity
+
+  # Outer seeds used to generate error bands on learning curves.
+  # Each (strategy, seed) pair becomes one HPC job.
+  seeds: [42, 43, 44, 45, 46]
+
+  # Active learning loop parameters
+  k_iter: 15       # number of AL iterations per run
+  query_size: 20   # compounds selected from the pool per iteration
+  n_start: 100     # initial labeled pool size (set to 0 when using --seed-data)
+
+training:
+  n_models: 5      # committee size (number of bootstrapped ensemble members)
+  max_epochs: 20   # maximum training epochs per committee member
