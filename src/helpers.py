@@ -282,7 +282,7 @@ def featurize(smiles_list, y_list=None, shuffle=False):
     scaler : object
         Fitted target scaler (used to inverse-transform predictions).
     """
-    featurizer = ChemPropFeaturizer(batch_size=64, shuffle=shuffle)
+    featurizer = ChemPropFeaturizer(batch_size=64, shuffle=shuffle, n_jobs=0)
     loader, indices, scaler, dataset = featurizer.featurize(smiles_list, y_list)
     return loader, scaler
 
@@ -380,24 +380,25 @@ def train_committee(smiles_labeled, y_labeled, n_models=5, seed=42, max_epochs=2
     rng = np.random.RandomState(seed)
 
     for i in range(n_models):
-        # Build and seed member first so pl.seed_everything controls dataloader shuffle
-        model, trainer = build_committee_member(
-            seed=seed + i, max_epochs=max_epochs, log_dir=None
-        )
+        with tempfile.TemporaryDirectory(prefix="al_logs_") as tmp_dir:
+            # Build and seed member first so pl.seed_everything controls dataloader shuffle
+            model, trainer = build_committee_member(
+                seed=seed + i, max_epochs=max_epochs, log_dir=tmp_dir
+            )
 
-        # Bootstrap resampling
-        n_samples = len(smiles_labeled)
-        boot_idx = rng.choice(n_samples, size=n_samples, replace=True)
-        X_boot = smiles_labeled.iloc[boot_idx].tolist()
-        y_boot = y_labeled.iloc[boot_idx].values
+            # Bootstrap resampling
+            n_samples = len(smiles_labeled)
+            boot_idx = rng.choice(n_samples, size=n_samples, replace=True)
+            X_boot = smiles_labeled.iloc[boot_idx].tolist()
+            y_boot = y_labeled.iloc[boot_idx].values
 
-        # Prepare data
-        train_loader, scaler = featurize(X_boot, y_boot, shuffle=True)
+            # Prepare data
+            train_loader, scaler = featurize(X_boot, y_boot, shuffle=True)
 
-        model.build(scaler=scaler)
-        trainer.build(no_val=True)
+            model.build(scaler=scaler)
+            trainer.build(no_val=True)
 
-        trainer.train(train_loader, None)
+            trainer.train(train_loader, None)
 
         members.append(model)
 
