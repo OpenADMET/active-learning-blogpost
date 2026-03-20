@@ -37,8 +37,8 @@ Checkpoint format (results/setup.pkl)
 --------------------------------------
     {
         "df_pool", "df_test", "df_seed",
-        "gtm_coords_pool", "gtm_coords_background",
-        "background_smiles", "config",
+        "gtm_coords_pool",
+        "config",
     }
 
 Per-job format (results/run_<STRATEGY>_seed<N>.pkl)
@@ -71,21 +71,19 @@ SETUP_PKL = Path("results/setup.pkl")
 
 def run_setup(cfg: ALConfig) -> dict:
     """Load data, scaffold-split, fit GTM, and optionally load external seed data."""
-    df = pd.read_parquet(Path(cfg.dataset_path).expanduser())
-
-    background_smiles = list(
-        pd.read_csv(cfg.background_path)[cfg.background_smiles_col].values
+    _ds_path = Path(cfg.dataset_path).expanduser()
+    df = (
+        pd.read_csv(_ds_path)
+        if _ds_path.suffix.lower() == ".csv"
+        else pd.read_parquet(_ds_path)
     )
-    background_smiles = [
-        x for x in background_smiles if x not in df["OPENADMET_CANONICAL_SMILES"].values
-    ]
 
     print(f"Dataset: {len(df)} compounds")
-    print(df["PXR_pEC50"].describe())
+    print(df[cfg.dataset_activity_col].describe())
 
     # Activity distribution plot
     fig, ax = plt.subplots(1, dpi=150)
-    ax.hist(df["PXR_pEC50"], bins=30, color="teal", alpha=0.7)
+    ax.hist(df[cfg.dataset_activity_col], bins=30, color="teal", alpha=0.7)
     ax.set_title("PXR pEC50 Distribution")
     ax.set_xlabel("pEC50", fontweight="bold")
     ax.set_ylabel("Count", fontweight="bold")
@@ -99,7 +97,7 @@ def run_setup(cfg: ALConfig) -> dict:
         train_size=0.8, val_size=0.1, test_size=0.1, random_state=42
     )
     X_pool, X_cal_tmp, X_test_tmp, y_pool, y_cal_tmp, y_test_tmp, _ = splitter.split(
-        df["OPENADMET_CANONICAL_SMILES"], df["PXR_pEC50"]
+        df[cfg.dataset_smiles_col], df[cfg.dataset_activity_col]
     )
 
     df_pool = pd.DataFrame({"smiles": X_pool, "pEC50": y_pool}).reset_index(drop=True)
@@ -120,23 +118,18 @@ def run_setup(cfg: ALConfig) -> dict:
     print(f"Pool size: \t\t{len(df_pool)}")
     print(f"Test size: \t\t{len(df_test)}")
 
-    # GTM embedding (pool + background, for visualization)
-    print("Fitting GTM on pool + background molecules...")
-    gtm_model, gtm_coords, resps, llhs = smiles_to_gtm(
-        list(df_pool["smiles"].values) + background_smiles,
+    # GTM embedding (pool compounds, for visualization)
+    print("Fitting GTM on pool molecules...")
+    gtm_model, gtm_coords_pool, resps, llhs = smiles_to_gtm(
+        list(df_pool["smiles"].values),
         device="cpu",
     )
-    gtm_coords_pool = gtm_coords[: len(df_pool)]
-    gtm_coords_background = gtm_coords[len(df_pool) :]
 
     # ── External seed data ─────────────────────────────────────────────────────
     df_seed = None
     if cfg.seed_data_path is not None:
         seed_path = Path(cfg.seed_data_path).expanduser()
-        if seed_path.suffix in {".parquet", ".pq"}:
-            df_seed_raw = pd.read_parquet(seed_path)
-        else:
-            df_seed_raw = pd.read_csv(seed_path)
+        df_seed_raw = pd.read_csv(seed_path)
         df_seed = (
             df_seed_raw[[cfg.seed_smiles_col, cfg.seed_activity_col]]
             .rename(
@@ -161,8 +154,6 @@ def run_setup(cfg: ALConfig) -> dict:
         "df_test": df_test,
         "df_seed": df_seed,
         "gtm_coords_pool": gtm_coords_pool,
-        "gtm_coords_background": gtm_coords_background,
-        "background_smiles": background_smiles,
         "config": cfg,
     }
 

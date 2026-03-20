@@ -64,8 +64,6 @@ def main() -> None:
     df_test = setup["df_test"]
     df_seed = setup.get("df_seed")
     gtm_coords_pool = setup["gtm_coords_pool"]
-    gtm_coords_background = setup["gtm_coords_background"]
-    background_smiles = setup["background_smiles"]
     cfg: ALConfig = setup["config"]
 
     if df_seed is not None:
@@ -268,7 +266,6 @@ def main() -> None:
     print(f"Generating GTM animation ({_method})...")
     fig = alp.plot_gtm_selection_animation(
         gtm_coords=gtm_coords_pool,
-        background_gtm_coords=gtm_coords_background,
         selection_history=all_runs[_method][0]["history"],
         title=f"{_method} Compound Selection in GTM Chemical Space",
     )
@@ -293,27 +290,15 @@ def main() -> None:
     _colors_list = [(0.75, 0.75, 0.75, 0.35)] + _iter_colors
     _point_colors = [_colors_list[ci] for ci in _c]
     fig_gtm_static, ax_gtm = plt.subplots(figsize=(8, 8))
-    if len(gtm_coords_background) > 0:
-        _bg_all = np.concatenate([gtm_coords_pool, gtm_coords_background], axis=0)
-        ax_gtm.scatter(
-            _bg_all[:, 0],
-            _bg_all[:, 1],
-            color=(0.75, 0.75, 0.75),
-            s=4,
-            alpha=0.25,
-            linewidths=0,
-            zorder=1,
-        )
-    else:
-        ax_gtm.scatter(
-            gtm_coords_pool[:, 0],
-            gtm_coords_pool[:, 1],
-            color=(0.75, 0.75, 0.75),
-            s=4,
-            alpha=0.25,
-            linewidths=0,
-            zorder=1,
-        )
+    ax_gtm.scatter(
+        gtm_coords_pool[:, 0],
+        gtm_coords_pool[:, 1],
+        color=(0.75, 0.75, 0.75),
+        s=4,
+        alpha=0.25,
+        linewidths=0,
+        zorder=1,
+    )
     ax_gtm.scatter(
         gtm_coords_pool[:, 0],
         gtm_coords_pool[:, 1],
@@ -341,12 +326,12 @@ def main() -> None:
 
     # ── TMAP (Faerun) ──────────────────────────────────────────────────────────────
     print("Computing TMAP layout...")
-    tmap_layout = smiles_to_tmap(list(df_pool["smiles"].values) + background_smiles)
+    tmap_layout = smiles_to_tmap(list(df_pool["smiles"].values))
 
     print("Generating TMAP visualization...")
     alp.plot_tmap_faerun(
         tmap_layout,
-        n_background=len(background_smiles),
+        n_background=0,
         smiles_list=df_pool["smiles"].values,
         selection_history=all_runs["EI"][0]["history"],
         point_scale=3,

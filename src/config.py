@@ -23,12 +23,11 @@ class ALConfig:
     Attributes
     ----------
     dataset_path : str
-        Path to the main labelled dataset (Parquet). Tilde expansion is applied.
-    background_path : str
-        Path to the background/context compound library (CSV or Parquet) used
-        solely for GTM and TMAP visualisations — never for training.
-    background_smiles_col : str
-        Column name in the background file containing SMILES strings.
+        Path to the main labelled dataset (CSV or Parquet). Tilde expansion is applied.
+    dataset_smiles_col : str
+        Column name for SMILES strings in the main dataset.
+    dataset_activity_col : str
+        Column name for activity values in the main dataset.
     seed_data_path : str or None
         Path to an external seed training dataset (CSV or Parquet), or ``None``
         to skip. These compounds are always in the training set and are never
@@ -57,8 +56,8 @@ class ALConfig:
     """
 
     dataset_path: str
-    background_path: str
-    background_smiles_col: str
+    dataset_smiles_col: str
+    dataset_activity_col: str
     seed_data_path: str | None
     seed_smiles_col: str
     seed_activity_col: str
@@ -123,15 +122,19 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         errors.append("[data] 'dataset_path' is required and must be a string")
         dataset_path = ""
 
-    background_path = data.get("background_path")
-    if not background_path or not isinstance(background_path, str):
-        errors.append("[data] 'background_path' is required and must be a string")
-        background_path = ""
+    dataset_smiles_col = data.get("dataset_smiles_col")
+    if not dataset_smiles_col or not isinstance(dataset_smiles_col, str):
+        errors.append(
+            "[data] 'dataset_smiles_col' is required and must be a non-empty string"
+        )
+        dataset_smiles_col = ""
 
-    background_smiles_col = data.get("background_smiles_col", "Smiles")
-    if not isinstance(background_smiles_col, str) or not background_smiles_col:
-        errors.append("[data] 'background_smiles_col' must be a non-empty string")
-        background_smiles_col = "Smiles"
+    dataset_activity_col = data.get("dataset_activity_col")
+    if not dataset_activity_col or not isinstance(dataset_activity_col, str):
+        errors.append(
+            "[data] 'dataset_activity_col' is required and must be a non-empty string"
+        )
+        dataset_activity_col = ""
 
     # seed data (optional)
     seed_data_path = data.get("seed_data_path", None)
@@ -196,8 +199,8 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
 
     return ALConfig(
         dataset_path=dataset_path,
-        background_path=background_path,
-        background_smiles_col=background_smiles_col,
+        dataset_smiles_col=dataset_smiles_col,
+        dataset_activity_col=dataset_activity_col,
         seed_data_path=seed_data_path,
         seed_smiles_col=seed_smiles_col,
         seed_activity_col=seed_activity_col,
