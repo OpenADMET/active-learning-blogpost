@@ -50,7 +50,7 @@ Edit `config.yaml` to point at your dataset and set experiment parameters:
 data:
   dataset_path: path/to/your/dataset.parquet   # main labelled dataset
   background_path: _data/octant_screening_compounds.csv
-  background_smiles_col: Smiles
+  background_smiles_col: smiles
   seed_data_path: null          # optional pretraining data; null = skip
   seed_smiles_col: smiles
   seed_activity_col: pEC50
@@ -58,9 +58,9 @@ data:
 active_learning:
   strategies: [EI, UCB, Random, Exploitation, Exploration, Diversity]
   seeds: [42, 43, 44, 45, 46]
-  k_iter: 15
-  query_size: 20
-  n_start: 100
+  k_iter: 10
+  query_size: 100
+  n_start: 0
 
 training:
   n_models: 5
