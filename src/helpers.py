@@ -1,3 +1,6 @@
+import pathlib
+import tempfile
+
 import numpy as np
 import pandas as pd
 import tmap as tm
@@ -327,9 +330,15 @@ def build_committee_member(seed=42, max_epochs=20, log_dir=False):
         metric_list=["mae", "rmse"],
     )
 
+    _output_dir = (
+        pathlib.Path(log_dir)
+        if log_dir
+        else pathlib.Path(tempfile.mkdtemp(prefix="al_logs_"))
+    )
+
     # Define the trainer
     trainer = LightningTrainer(
-        output_dir=log_dir,
+        output_dir=_output_dir,
         max_epochs=max_epochs,
         accelerator="gpu",
         devices=1,
