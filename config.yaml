@@ -1,7 +1,7 @@
 data:
   # Path to the main labelled dataset (CSV or Parquet). Tilde expansion is applied.
   dataset_path: data/challenge_train.csv
-  dataset_smiles_col: smiles
+  dataset_smiles_col: SMILES
   dataset_activity_col: pEC50
 
   # Optional external seed training dataset (CSV). Set to null to skip.
@@ -24,7 +24,7 @@ active_learning:
 
   # Outer seeds used to generate error bands on learning curves.
   # Each (strategy, seed) pair becomes one HPC job.
-  seeds: [95, 4, 10, 53, 86]
+  seeds: [42, 43, 44, 45, 46]
 
   # Active learning loop parameters
   k_iter: 10       # Number of AL iterations per run
