@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import tmap as tm
 import torch
 import useful_rdkit_utils as uru
@@ -450,6 +451,14 @@ def query_batch(
         return selected_idx, None
 
     if strategy == "Diversity":
+        # When no pool compounds have been labeled yet (e.g. n_start=0 with external
+        # seed data), fall back to random so cdist does not receive an empty matrix.
+        if labeled_gtm_coords is None or len(labeled_gtm_coords) == 0:
+            rng = np.random.RandomState(seed)
+            selected_idx = rng.choice(
+                n_unlabeled, size=min(size, n_unlabeled), replace=False
+            )
+            return selected_idx, None
         # Max-min diversity: pick the compounds with the greatest minimum
         # Euclidean distance to any already-labeled compound in GTM space.
         dists = cdist(unlabeled_gtm_coords, labeled_gtm_coords, metric="euclidean")
@@ -476,17 +485,21 @@ def query_batch(
     return top_indices, scores_1d
 
 
-def evaluate_on_test(committee, smiles_test, y_test):
+def evaluate_on_test(committee, y_test, X_test_loader=None, smiles_test=None):
     """Evaluate a committee regressor on a held-out test set.
 
     Parameters
     ----------
     committee : CommitteeRegressor
         Trained committee model to evaluate.
-    smiles_test : list[str] or pd.Series
-        SMILES strings for the test compounds.
     y_test : array-like
         Ground-truth target values for the test compounds.
+    X_test_loader : DataLoader or None, optional
+        Pre-computed featurized test loader. When provided ``smiles_test`` is
+        ignored and featurization is skipped. Default is None.
+    smiles_test : list[str] or pd.Series or None, optional
+        SMILES strings for the test compounds. Used only when
+        ``X_test_loader`` is None. Default is None.
 
     Returns
     -------
@@ -501,11 +514,12 @@ def evaluate_on_test(committee, smiles_test, y_test):
         - ``"y_test_pred"`` : np.ndarray — predicted mean values.
         - ``"y_test_std"`` : np.ndarray — predicted standard deviations.
     """
-    X_featurized, _ = featurize(smiles_test)
+    if X_test_loader is None:
+        X_test_loader, _ = featurize(smiles_test)
     y_test_arr = np.array(y_test).reshape(-1, 1)
 
     # Get predictions
-    mean_pred, std_pred = committee.predict(X_featurized, return_std=True)
+    mean_pred, std_pred = committee.predict(X_test_loader, return_std=True)
 
     # Regression metrics
     reg_metrics = RegressionMetrics()
@@ -531,13 +545,25 @@ def evaluate_on_test(committee, smiles_test, y_test):
 
 
 def run_active_learning(
-    df_pool, df_test, n_start=100, k_iter=15, seed=42, strategy="Random", verbose=True
+    df_pool,
+    df_test,
+    n_start=100,
+    k_iter=15,
+    query_size=20,
+    n_models=5,
+    max_epochs=20,
+    seed=42,
+    strategy="Random",
+    verbose=True,
+    df_seed=None,
+    gtm_coords=None,
 ):
     """Execute a full active learning loop for one strategy and seed.
 
-    Starts with a random initial labeled subset, then iteratively queries the
-    unlabeled pool and re-trains the committee for ``k_iter`` rounds. Evaluates
-    on the held-out test set after each iteration and records full state history.
+    Starts with a random initial labeled subset (or empty if ``n_start=0``),
+    then iteratively queries the unlabeled pool and re-trains the committee for
+    ``k_iter`` rounds. Evaluates on the held-out test set after each iteration
+    and records full state history.
 
     Parameters
     ----------
@@ -546,11 +572,19 @@ def run_active_learning(
     df_test : pd.DataFrame
         Held-out test set with columns ``"smiles"`` and ``"pEC50"``.
     n_start : int, optional
-        Number of randomly selected compounds in the initial labeled set.
-        Default is 100.
+        Number of randomly selected pool compounds in the initial labeled set.
+        Set to ``0`` when ``df_seed`` is provided to let external data bootstrap
+        the committee without consuming pool budget. Default is 100.
     k_iter : int, optional
         Number of active learning iterations after the initial training.
         Default is 15.
+    query_size : int, optional
+        Number of compounds to select from the pool at each iteration.
+        Default is 20.
+    n_models : int, optional
+        Number of committee members to train at each iteration. Default is 5.
+    max_epochs : int, optional
+        Maximum training epochs per committee member. Default is 20.
     seed : int, optional
         Base random seed for both initial selection and subsequent queries.
         Default is 42.
@@ -560,6 +594,18 @@ def run_active_learning(
         Default is ``"Random"``.
     verbose : bool, optional
         Whether to print progress after each iteration. Default is True.
+    df_seed : pd.DataFrame or None, optional
+        External seed training data with columns ``"smiles"`` and ``"pEC50"``
+        (e.g. ChEMBL PXR data). When provided, these compounds are concatenated
+        with the pool-acquired labels at every training step. They are never
+        queried, never appear in the test set, and are **not** counted toward
+        ``n_labeled`` in the history records. Default is None.
+    gtm_coords : np.ndarray or None, optional
+        Precomputed GTM 2D coordinates for ``df_pool`` (shape ``(n_pool, 2)``),
+        as returned by ``smiles_to_gtm``. When provided the GTM fit is skipped,
+        saving significant compute per job. Required for the ``"Diversity"``
+        strategy; other strategies pass these coords through to ``query_batch``
+        but do not use them. Default is None (GTM is computed on-the-fly).
 
     Returns
     -------
@@ -577,10 +623,11 @@ def run_active_learning(
     n_total = len(df_pool)
     all_indices = np.arange(n_total)
 
-    # Initialize the labeled mask using the starting indices
-    initial_idx = rng.choice(all_indices, size=n_start, replace=False)
+    # Initialize the labeled mask; n_start=0 is valid when df_seed bootstraps the model.
     labeled_mask = np.zeros(n_total, dtype=bool)
-    labeled_mask[initial_idx] = True
+    if n_start > 0:
+        initial_idx = rng.choice(all_indices, size=n_start, replace=False)
+        labeled_mask[initial_idx] = True
 
     # Container for state history
     history = []
@@ -588,8 +635,14 @@ def run_active_learning(
     # Start empty so iteration 0 correctly captures initial_idx as newly selected
     prev_labeled_mask = np.zeros(n_total, dtype=bool)
 
-    # Precompute GTM coordinates for diversity-based strategy
-    gtm_model, gtm_coords = smiles_to_gtm(df_pool["smiles"].tolist())
+    # Use precomputed GTM coordinates when provided; otherwise fit on-the-fly.
+    # smiles_to_gtm returns (gtm, crds_2d, resps, llhs) — unpack accordingly.
+    if gtm_coords is None:
+        _, gtm_coords, _, _ = smiles_to_gtm(df_pool["smiles"].tolist())
+
+    # Pre-compute test loader once; reused at every iteration (test set never changes).
+    X_test_loader, _ = featurize(df_test["smiles"].tolist())
+    y_test_arr_full = df_test["pEC50"].values
 
     for k in range(k_iter + 1):
         labeled_idx = np.where(labeled_mask)[0]
@@ -601,31 +654,88 @@ def run_active_learning(
 
         # Current labeled data
         df_labeled = df_pool.iloc[labeled_idx]
-        best_y = df_labeled["pEC50"].max()
+
+        # best_y: max over pool-acquired labels; seed data provides the reference
+        # when the pool labeled set is still empty (n_start=0).
+        if len(df_labeled) > 0 and df_seed is not None and len(df_seed) > 0:
+            best_y = max(df_labeled["pEC50"].max(), df_seed["pEC50"].max())
+        elif len(df_labeled) > 0:
+            best_y = df_labeled["pEC50"].max()
+        elif df_seed is not None and len(df_seed) > 0:
+            best_y = df_seed["pEC50"].max()
+        else:
+            raise ValueError(
+                "No labeled pool compounds and no seed data at iteration 0. "
+                "Either set n_start > 0 or provide df_seed."
+            )
+
+        # Build training set: pool-acquired labels + full external seed data
+        if df_seed is not None and len(df_seed) > 0:
+            df_train = pd.concat([df_labeled, df_seed], ignore_index=True)
+        else:
+            df_train = df_labeled
+
+        # Hold out 10% of pool-acquired compounds for per-iteration calibration.
+        # Seed data is always kept in the training set (it is never queried and
+        # should be fully exploited). Fall back to sampling from df_train only
+        # when the pool labeled set is too small to spare any compounds.
+        _cal_min_pool = 10  # minimum pool-labeled compounds before we can hold out
+        if len(df_labeled) >= _cal_min_pool:
+            n_cal = max(1, int(0.1 * len(df_labeled)))
+            df_cal_iter = df_labeled.sample(n=n_cal, random_state=seed + k)
+            # Remove calibration compounds from the full training DataFrame
+            df_train_fit = df_train[~df_train.index.isin(df_cal_iter.index)]
+        else:
+            # Not enough pool compounds yet — sample cal from the full training set
+            # as a fallback (includes seed data).
+            n_cal = max(1, int(0.1 * len(df_train)))
+            df_cal_iter = df_train.sample(n=n_cal, random_state=seed + k)
+            df_train_fit = df_train.drop(df_cal_iter.index)
 
         if verbose:
-            print(f"Iter {k}: {len(df_labeled)} labeled. Best pEC50: {best_y:.2f}")
+            n_seed_log = len(df_seed) if df_seed is not None else 0
+            print(
+                f"Iter {k}: {len(df_labeled)} pool-labeled + {n_seed_log} seed "
+                f"({len(df_train_fit)} train, {len(df_cal_iter)} cal). "
+                f"Best pEC50: {best_y:.2f}"
+            )
 
-        # Train committee
+        # Train committee on the 90% training subset; seed+k decorrelates bootstrap
+        # draws across iterations within a run (avoids the same RNG start point each time).
         committee = train_committee(
-            df_labeled["smiles"],
-            df_labeled["pEC50"],
-            seed,
-            bootstrap_seed=seed + k,
-            al_iter=k,
-            run_name=strategy,
+            df_train_fit["smiles"],
+            df_train_fit["pEC50"],
+            n_models=n_models,
+            max_epochs=max_epochs,
+            seed=seed + k,
         )
 
-        # Evaluate
-        res = evaluate_on_test(committee, df_test["smiles"], df_test["pEC50"])
+        # Evaluate BEFORE calibration (stored for visualization)
+        res_pre = evaluate_on_test(
+            committee, y_test_arr_full, X_test_loader=X_test_loader
+        )
+
+        # Calibrate uncertainty on the held-out 10%
+        X_cal_loader, _ = featurize(df_cal_iter["smiles"].tolist())
+        y_cal_arr = df_cal_iter["pEC50"].values.reshape(-1, 1)
+        committee.calibrate_uncertainty(
+            X_cal_loader, y_cal_arr, method="scaling-factor"
+        )
+
+        # Evaluate AFTER calibration
+        res = evaluate_on_test(committee, y_test_arr_full, X_test_loader=X_test_loader)
 
         # Record state
         state = {
             "iteration": k,
             "n_labeled": len(df_labeled),
+            "n_seed": len(df_seed) if df_seed is not None else 0,
             "best_y": best_y,
             "pool_y_values": df_labeled["pEC50"].values.tolist(),
             "selected_pool_indices": newly_labeled_idx.tolist(),
+            "y_test_pred_pre_cal": res_pre["y_test_pred"],
+            "y_test_std_pre_cal": res_pre["y_test_std"],
+            "miscal_area_pre_cal": res_pre["miscal_area"],
             **res,
         }
         history.append(state)
@@ -640,7 +750,8 @@ def run_active_learning(
                 df_unlabeled["smiles"].tolist(),
                 strategy,
                 best_y,
-                seed + k,
+                size=query_size,
+                seed=seed + k,
                 unlabeled_gtm_coords=gtm_coords[unlabeled_idx],
                 labeled_gtm_coords=gtm_coords[labeled_idx],
             )
