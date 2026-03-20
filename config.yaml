@@ -7,13 +7,13 @@ data:
   background_path: _data/octant_screening_compounds.csv
 
   # Column in the background file that contains SMILES strings.
-  background_smiles_col: Smiles
+  background_smiles_col: smiles
 
   # Optional external seed training dataset. Set to null to skip.
   # These compounds are always included in the training set at every AL iteration
   # and are never queried or evaluated.
   seed_data_path: null
-  seed_smiles_col: smiles
+  seed_smiles_col: smiles5
   seed_activity_col: pEC50
 
 active_learning:
@@ -29,12 +29,12 @@ active_learning:
 
   # Outer seeds used to generate error bands on learning curves.
   # Each (strategy, seed) pair becomes one HPC job.
-  seeds: [42, 43, 44, 45, 46]
+  seeds: [95, 4, 10, 53, 86]
 
   # Active learning loop parameters
-  k_iter: 15       # number of AL iterations per run
-  query_size: 20   # compounds selected from the pool per iteration
-  n_start: 100     # initial labeled pool size (set to 0 when using --seed-data)
+  k_iter: 10       # number of AL iterations per run
+  query_size: 100  # compounds selected from the pool per iteration
+  n_start: 0       # initial labeled pool size (set to 0 when using --seed-data)
 
 training:
   n_models: 5      # committee size (number of bootstrapped ensemble members)
