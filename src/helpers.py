@@ -3,13 +3,11 @@ import tempfile
 
 import numpy as np
 import pandas as pd
-import tmap as tm
 import torch
 import useful_rdkit_utils as uru
 from chemographykit.gtm import GTM
 from chemographykit.utils.molecules import calculate_latent_coords
 from lightning import pytorch as pl
-from mhfp.encoder import MHFPEncoder
 from openadmet.models.active_learning.committee import CommitteeRegressor
 from openadmet.models.architecture.chemprop import ChemPropModel
 from openadmet.models.eval.regression import RegressionMetrics
@@ -180,6 +178,9 @@ def smiles_to_tmap(
         source indices, and edge target indices, all as numpy arrays of length
         n_compounds (for x/y) or n_edges (for s/t).
     """
+    import tmap as tm  # deferred: not available on all platforms
+    from mhfp.encoder import MHFPEncoder  # deferred: depends on tmap
+
     enc = MHFPEncoder(fp_size, fp_radius)
     # NumPy 2.0+ raises OverflowError when the Mersenne prime (2^61-1) used
     # in mhfp's hash arithmetic is larger than the uint32 permutation arrays.
