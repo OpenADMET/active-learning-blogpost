@@ -247,14 +247,13 @@ def main() -> None:
 
     # ── Hit discovery curve ────────────────────────────────────────────────────────
     print("Generating hit discovery curve...")
-    # Pin to the first seed: plot_hit_discovery_curve groups by (strategy, iteration)
-    # and counts hits, so mixing seeds would inflate counts by N_seeds.
-    _vis_seed = all_runs[cfg.strategies[0]][0]["seed"]
-    pool_history_vis = pool_history_long[pool_history_long["seed"] == _vis_seed]
+    _hit_threshold = 6.3
+    _max_hits = int((df_pool["pEC50"] >= _hit_threshold).sum())
     fig = alp.plot_hit_discovery_curve(
-        pool_history_vis,
+        pool_history_long,
         learning_curve_long,
-        hit_threshold=6.3,
+        hit_threshold=_hit_threshold,
+        max_hits=_max_hits,
         strategy_order=cfg.strategies,
         color_map=STRATEGY_COLORS,
     )
@@ -312,6 +311,7 @@ def main() -> None:
     ax_gtm.set_ylabel("GTM dimension 2")
     ax_gtm.set_facecolor("white")
     fig_gtm_static.patch.set_facecolor("white")
+    ax_gtm.set_box_aspect(1)
     _sm = plt.cm.ScalarMappable(
         cmap=_base_cmap, norm=mcolors.Normalize(vmin=0, vmax=_n_iter - 1)
     )
@@ -372,6 +372,7 @@ def main() -> None:
     ax_tmap.set_title("Active Learning Selection (TMAP)")
     ax_tmap.axis("off")
     fig_tmap_static.patch.set_facecolor("white")
+    ax_tmap.set_box_aspect(1)
     _tsm = plt.cm.ScalarMappable(
         cmap=_tmap_base_cmap, norm=mcolors.Normalize(vmin=0, vmax=_n_ei_iter - 1)
     )

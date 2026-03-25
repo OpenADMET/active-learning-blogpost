@@ -105,6 +105,7 @@ def plot_hit_discovery_curve(
     pool_history_df: pd.DataFrame,
     learning_curve_df: pd.DataFrame,
     hit_threshold: float,
+    max_hits: int,
     strategy_order: list[str],
     color_map: dict | None = None,
     value_col: str = "pEC50",
@@ -113,18 +114,23 @@ def plot_hit_discovery_curve(
 ) -> go.Figure:
     """
     Interactive line plot of cumulative hits found vs. number of labeled molecules,
-    with one line per strategy and a dashed reference line at the max hits found.
+    with mean ± 1σ bands per strategy and a dashed reference line at the absolute
+    hit ceiling.
 
     Parameters
     ----------
     pool_history_df : pd.DataFrame
-        Must have columns: strategy, iteration, {value_col}. One row per compound
-        in the labeled pool at each iteration.
+        Must have columns: strategy, seed, iteration, {value_col}. One row per
+        compound in the labeled pool at each (seed, iteration).
     learning_curve_df : pd.DataFrame
-        Must have columns: strategy, iteration, n_labeled. Used to map iteration to
-        labeled-pool size for the x-axis.
+        Must have columns: strategy, seed, iteration, n_labeled. Used to map
+        (strategy, seed, iteration) to labeled-pool size for the x-axis.
     hit_threshold : float
         Minimum value_col value for a compound to be counted as a hit.
+    max_hits : int
+        Total number of hits in the full compound pool — an absolute upper bound
+        independent of strategy or seed. Used as the dashed reference line and as
+        the ceiling for the upper error band.
     strategy_order : list[str]
         Strategies to plot, controls legend order.
     color_map : dict or None, optional
@@ -138,35 +144,74 @@ def plot_hit_discovery_curve(
     -------
     go.Figure
     """
-    hits_per_iter = (
-        pool_history_df.groupby(["strategy", "iteration"])[value_col]
+    # Count hits per (strategy, seed, iteration), then map to n_labeled.
+    hits_per_seed_iter = (
+        pool_history_df.groupby(["strategy", "seed", "iteration"])[value_col]
         .apply(lambda s: (s >= hit_threshold).sum())
         .reset_index(name="n_hits")
     )
     n_labeled = learning_curve_df[
-        ["strategy", "iteration", "n_labeled"]
+        ["strategy", "seed", "iteration", "n_labeled"]
     ].drop_duplicates()
-    hits_df = hits_per_iter.merge(n_labeled, on=["strategy", "iteration"], how="left")
+    hits_df = hits_per_seed_iter.merge(
+        n_labeled, on=["strategy", "seed", "iteration"], how="left"
+    )
 
-    last_iter = pool_history_df["iteration"].max()
-    max_hits = int(
-        pool_history_df[pool_history_df["iteration"] == last_iter]
-        .groupby("strategy")[value_col]
-        .apply(lambda s: (s >= hit_threshold).sum())
-        .max()
+    # Aggregate across seeds: mean ± std per (strategy, n_labeled).
+    # std is NaN when only one seed is present; fill to 0 so bands collapse gracefully.
+    hits_summary = (
+        hits_df.groupby(["strategy", "n_labeled"])["n_hits"]
+        .agg(n_hits_mean="mean", n_hits_std="std")
+        .reset_index()
+        .fillna({"n_hits_std": 0})
+    )
+    hits_summary["n_hits_lower"] = hits_summary["n_hits_mean"] - hits_summary["n_hits_std"]
+    hits_summary["n_hits_upper"] = np.minimum(
+        hits_summary["n_hits_mean"] + hits_summary["n_hits_std"], max_hits
     )
 
     fig = go.Figure()
 
     for strategy in strategy_order:
-        df_sub = hits_df[hits_df["strategy"] == strategy].sort_values("n_labeled")
+        df_sub = hits_summary[hits_summary["strategy"] == strategy].sort_values(
+            "n_labeled"
+        )
         if df_sub.empty:
             continue
         color = color_map.get(strategy, None) if color_map else None
+
+        # Upper bound — invisible line, anchors the fill
         fig.add_trace(
             go.Scatter(
                 x=df_sub["n_labeled"],
-                y=df_sub["n_hits"],
+                y=df_sub["n_hits_upper"],
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+                **({"line_color": color} if color else {}),
+            )
+        )
+        # Lower bound — fills back to the upper bound
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["n_hits_lower"],
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor=(
+                    _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
+                ),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        # Mean line
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["n_hits_mean"],
                 mode="lines",
                 name=strategy,
                 line=dict(width=2, color=color),
@@ -176,7 +221,7 @@ def plot_hit_discovery_curve(
     fig.add_hline(
         y=max_hits,
         line=dict(color="black", width=1.2, dash="dash"),
-        annotation_text=f"Max hits found ({max_hits})",
+        annotation_text=f"Total hits in pool ({max_hits})",
         annotation_position="top right",
     )
 
