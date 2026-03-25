@@ -60,13 +60,15 @@ Random splitting is dangerously optimistic in drug discovery because it allows s
 We use a **scaffold split** to separate the data based on [Bemis-Murcko scaffolds](https://practicalcheminformatics.blogspot.com/2021/10/exploratory-data-analysis-with.html). This forces the model to generalize to new chemical series, mimicking a prospective lead optimization scenario. This test set is fixed and held out for the entire active learning loop, ensuring a fair, apples-to-apples comparison across all iterations.
 
 ```python
-splitter = ScaffoldSplitter(train_size=0.8, val_size=0.1, test_size=0.1, random_state=42)
-X_pool, X_cal, X_test, y_pool, y_cal, y_test, _ = splitter.split(
+splitter = ScaffoldSplitter(train_size=0.8, val_size=0.0, test_size=0.2, random_state=42)
+X_pool, _, X_test, y_pool, _, y_test, _ = splitter.split(
     df["OPENADMET_CANONICAL_SMILES"], df["PXR_pEC50"]
 )
+df_pool = pd.DataFrame({"smiles": X_pool, "pEC50": y_pool})
+df_test = pd.DataFrame({"smiles": X_test,  "pEC50": y_test})
 ```
 
-The 80% training split becomes the **candidate pool** from which the active learner selects new labels, the 10% validation split serves as a post-hoc **calibration set**, and the 10% test split is the fixed evaluation benchmark held out for the entire campaign.
+The 80% training split becomes the **candidate pool** from which the active learner selects new labels, and the 20% test split is the fixed evaluation benchmark held out for the entire campaign.
 
 ## GTM chemical space embedding
 
@@ -116,7 +118,7 @@ We track not just accuracy (MAE), but also the *quality* of the molecules we fou
 
 Run `python run.py` to execute the loop for all six strategies with a fixed seed. Results are checkpointed to `results/all_runs.pkl` after each strategy, so the run can be safely interrupted and resumed — strategies already present in the checkpoint are skipped automatically.
 
-The checkpoint stores the full per-iteration history for each strategy (test-set metrics, labeled pool snapshot, selected pool indices) together with the pre-fitted GTM coordinates, the scaffold-split DataFrames (`df_pool`, `df_cal`, `df_test`), and the campaign configuration. This self-contained payload means `analysis.py` needs no access to the original dataset.
+The checkpoint stores the full per-iteration history for each strategy (test-set metrics, labeled pool snapshot, selected pool indices) together with the pre-fitted GTM coordinates, the scaffold-split DataFrames (`df_pool`, `df_test`), the optional external seed data (`df_seed`), and the campaign configuration. This self-contained payload means `analysis.py` needs no access to the original dataset.
 
 ## Unpacking results
 
@@ -171,7 +173,7 @@ Use the slider to step through iterations manually, or press **▶ Play** to wat
 
 A model with good MAE can still be overconfident. In active learning, this is dangerous: if the model is confident but wrong about an unlabeled region, it may never query it (for **EI** / **UCB**). We tackled the topic of model uncertainty in another OpenADMET blogpost, [Concerning Uncertainty](https://openadmet.ghost.io/concerning-uncertainty/).
 
-We evaluate calibration using the **miscalibration area**. A perfectly calibrated model has e.g. 90% of data points falling within its 90% confidence interval. We can improve this post-hoc using **scaling factor** calibration on a small holdout set (`df_cal`). `analysis.py` takes the final EI committee, calibrates it on `df_cal`, and re-evaluates on `df_test`.
+We evaluate calibration using the **miscalibration area**. A perfectly calibrated model has e.g. 90% of data points falling within its 90% confidence interval. At each active learning iteration, 10% of the pool-acquired labels are held out as a training-phase calibration set (`train_cal`) and used to fit a **scaling factor** calibrator on the committee's uncertainty estimates. `analysis.py` then visualises the before/after calibration curves evaluated on the held-out `df_test`.
 
 [![Uncertainty calibration curve before and after scaling-factor calibration (click for interactive version)](results/calibration_curve.png)](results/calibration_curve.html)
 

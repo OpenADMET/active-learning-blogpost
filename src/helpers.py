@@ -13,7 +13,6 @@ from openadmet.models.architecture.chemprop import ChemPropModel
 from openadmet.models.eval.regression import RegressionMetrics
 from openadmet.models.eval.uncertainty import UncertaintyMetrics
 from openadmet.models.features.chemprop import ChemPropFeaturizer
-from openadmet.models.split.scaffold import ScaffoldSplitter
 from openadmet.models.trainer.lightning import LightningTrainer
 from rdkit import Chem
 from scipy.spatial.distance import cdist
@@ -208,58 +207,6 @@ def smiles_to_tmap(
 
     x, y, s, t, _ = tm.layout_from_lsh_forest(lf, config=cfg)
     return np.array(x), np.array(y), np.array(s, dtype=int), np.array(t, dtype=int)
-
-
-def split_data(
-    X,
-    y,
-    train_size=0.8,
-    val_size=0.1,
-    test_size=0.1,
-    random_state=42,
-):
-    """Split data into train/validation/test sets using scaffold splitting.
-
-    Parameters
-    ----------
-    X : array-like
-        Input features or SMILES strings passed to the scaffold splitter.
-    y : array-like
-        Target values corresponding to each entry in ``X``.
-    train_size : float, optional
-        Fraction of data to allocate to the training (pool) split. Default is 0.8.
-    val_size : float, optional
-        Fraction of data to allocate to the validation (calibration) split.
-        Default is 0.1.
-    test_size : float, optional
-        Fraction of data to allocate to the test split. Default is 0.1.
-    random_state : int, optional
-        Random seed for reproducibility. Default is 42.
-
-    Returns
-    -------
-    X_pool : array-like
-        Training/pool features.
-    X_cal : array-like
-        Validation/calibration features.
-    X_test : array-like
-        Test features.
-    y_pool : array-like
-        Training/pool targets.
-    y_cal : array-like
-        Validation/calibration targets.
-    y_test : array-like
-        Test targets.
-    """
-    splitter = ScaffoldSplitter(
-        train_size=train_size,
-        val_size=val_size,
-        test_size=test_size,
-        random_state=random_state,
-    )
-
-    X_pool, X_cal, X_test, y_pool, y_cal, y_test, _ = splitter.split(X, y)
-    return X_pool, X_cal, X_test, y_pool, y_cal, y_test
 
 
 def featurize(smiles_list, y_list=None, shuffle=False):
@@ -707,7 +654,7 @@ def run_active_learning(
             n_seed_log = len(df_seed) if df_seed is not None else 0
             print(
                 f"Iter {k}: {len(df_labeled)} pool-labeled + {n_seed_log} seed "
-                f"({len(df_train_fit)} train, {len(df_cal_iter)} cal). "
+                f"({len(df_train_fit)} train, {len(df_cal_iter)} train_cal). "
                 f"Best pEC50: {best_y:.2f}"
             )
 
