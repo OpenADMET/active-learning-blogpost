@@ -32,17 +32,17 @@ from pathlib import Path
 logging.getLogger("kaleido").setLevel(logging.WARNING)
 logging.getLogger("choreographer").setLevel(logging.WARNING)
 
-import matplotlib.cm as mcm
-import matplotlib.colors as mcolors
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import uncertainty_toolbox as uct
-from kaleido import Kaleido
+import matplotlib.cm as mcm  # noqa: E402
+import matplotlib.colors as mcolors  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import uncertainty_toolbox as uct  # noqa: E402
+from kaleido import Kaleido  # noqa: E402
 
-import src.plots as alp
-from src.config import ALConfig
-from src.helpers import (
+import src.plots as alp  # noqa: E402
+from src.config import ALConfig  # noqa: E402
+from src.helpers import (  # noqa: E402
     STRATEGY_COLORS,
     smiles_to_tmap,
 )
