@@ -255,8 +255,7 @@ def main() -> None:
 
     # ── Mode 1: setup only ─────────────────────────────────────────────────────
     if args.setup_only:
-        cfg = load_config(args.config)
-        setup = run_setup(cfg)
+        setup = run_setup(load_config(args.config))
         with open(SETUP_PKL, "wb") as fh:
             pickle.dump(setup, fh, protocol=pickle.HIGHEST_PROTOCOL)
         print(f"Setup saved to {SETUP_PKL}.")

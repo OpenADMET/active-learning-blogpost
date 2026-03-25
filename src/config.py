@@ -197,6 +197,13 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
             "Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
+    # At this point all values are validated; assert to satisfy static analysis.
+    assert k_iter is not None
+    assert query_size is not None
+    assert n_start is not None
+    assert n_models is not None
+    assert max_epochs is not None
+
     return ALConfig(
         dataset_path=dataset_path,
         dataset_smiles_col=dataset_smiles_col,
