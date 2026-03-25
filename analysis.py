@@ -254,7 +254,7 @@ def main() -> None:
     fig = alp.plot_hit_discovery_curve(
         pool_history_vis,
         learning_curve_long,
-        hit_threshold=7.0,
+        hit_threshold=6.3,
         strategy_order=cfg.strategies,
         color_map=STRATEGY_COLORS,
     )
