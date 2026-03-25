@@ -94,20 +94,14 @@ def run_setup(cfg: ALConfig) -> dict:
     # Scaffold split: 80% pool, 20% test. Per-iteration calibration is handled
     # inside run_active_learning by holding out 10% of the current training set.
     splitter = ScaffoldSplitter(
-        train_size=0.8, val_size=0.1, test_size=0.1, random_state=42
+        train_size=0.8, val_size=0.0, test_size=0.2, random_state=42
     )
-    X_pool, X_cal_tmp, X_test_tmp, y_pool, y_cal_tmp, y_test_tmp, _ = splitter.split(
+    X_pool, _, X_test, y_pool, _, y_test, _ = splitter.split(
         df[cfg.dataset_smiles_col], df[cfg.dataset_activity_col]
     )
 
     df_pool = pd.DataFrame({"smiles": X_pool, "pEC50": y_pool}).reset_index(drop=True)
-    # Combine the val and test splits into a single 20% held-out test set.
-    df_test = pd.DataFrame(
-        {
-            "smiles": list(X_cal_tmp) + list(X_test_tmp),
-            "pEC50": list(y_cal_tmp) + list(y_test_tmp),
-        }
-    ).reset_index(drop=True)
+    df_test = pd.DataFrame({"smiles": X_test, "pEC50": y_test}).reset_index(drop=True)
 
     min_pool_needed = cfg.k_iter * cfg.query_size
     assert len(df_pool) >= min_pool_needed, (
