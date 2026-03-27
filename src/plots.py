@@ -714,6 +714,105 @@ def plot_tmap_faerun(
     return f
 
 
+def plot_calibration_area_per_iteration(
+    cal_area_df: pd.DataFrame,
+    strategy_order: list[str],
+    color_map: dict | None = None,
+    width: int = 700,
+    height: int = 450,
+) -> go.Figure:
+    """
+    Line plot of miscalibration area per iteration for each strategy,
+    showing before- and after-calibration on the same panel.
+
+    Solid lines represent post-calibration area; dashed lines represent
+    pre-calibration (raw ensemble) area. Both are shown with ±1σ bands
+    aggregated across seeds. Lower values indicate better calibration.
+
+    Parameters
+    ----------
+    cal_area_df : pd.DataFrame
+        Must have columns: ``strategy``, ``n_labeled``,
+        ``miscal_area_mean``, ``miscal_area_lower``, ``miscal_area_upper``,
+        ``miscal_area_pre_cal_mean``, ``miscal_area_pre_cal_lower``,
+        ``miscal_area_pre_cal_upper``.
+    strategy_order : list[str]
+        Strategies to plot, controls legend order.
+    color_map : dict or None, optional
+        Mapping of strategy name to CSS color string.
+    width, height : int, optional
+        Figure dimensions in pixels.
+
+    Returns
+    -------
+    go.Figure
+    """
+    fig = go.Figure()
+
+    for strategy in strategy_order:
+        df_sub = cal_area_df[cal_area_df["strategy"] == strategy].sort_values(
+            "n_labeled"
+        )
+        if df_sub.empty:
+            continue
+
+        color = color_map.get(strategy, None) if color_map else None
+        fill_color = _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
+
+        for prefix, dash, show_legend, label_suffix in [
+            ("miscal_area", "solid", True, ""),
+            ("miscal_area_pre_cal", "dot", True, " (pre-cal)"),
+        ]:
+            # Upper bound — invisible, anchors fill
+            fig.add_trace(
+                go.Scatter(
+                    x=df_sub["n_labeled"],
+                    y=df_sub[f"{prefix}_upper"],
+                    mode="lines",
+                    line=dict(width=0),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+            # Lower bound — fills back to upper
+            fig.add_trace(
+                go.Scatter(
+                    x=df_sub["n_labeled"],
+                    y=df_sub[f"{prefix}_lower"],
+                    mode="lines",
+                    line=dict(width=0),
+                    fill="tonexty",
+                    fillcolor=fill_color,
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+            # Mean line
+            fig.add_trace(
+                go.Scatter(
+                    x=df_sub["n_labeled"],
+                    y=df_sub[f"{prefix}_mean"],
+                    mode="lines",
+                    name=f"{strategy}{label_suffix}",
+                    legendgroup=f"{strategy}{label_suffix}",
+                    showlegend=show_legend,
+                    line=dict(width=2, color=color, dash=dash),
+                )
+            )
+
+    fig.update_layout(
+        xaxis_title="Number of Labeled Molecules",
+        yaxis_title="Miscalibration Area (lower = better)",
+        legend_title="Strategy",
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        plot_bgcolor="white",
+        width=width,
+        height=height,
+    )
+    return fig
+
+
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     """Convert a CSS hex color string to an ``rgba()`` string with the given alpha.
 
