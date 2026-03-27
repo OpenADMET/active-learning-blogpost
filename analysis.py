@@ -172,6 +172,8 @@ def main() -> None:
                         "r2": step["r2"],
                         "ktau": step["ktau"],
                         "spearmanr": step["spearmanr"],
+                        "miscal_area": step["miscal_area"],
+                        "miscal_area_pre_cal": step["miscal_area_pre_cal"],
                     }
                 )
                 for pval in step["pool_y_values"]:
@@ -202,11 +204,15 @@ def main() -> None:
             ktau_std=("ktau", "std"),
             r2_mean=("r2", "mean"),
             r2_std=("r2", "std"),
+            miscal_area_mean=("miscal_area", "mean"),
+            miscal_area_std=("miscal_area", "std"),
+            miscal_area_pre_cal_mean=("miscal_area_pre_cal", "mean"),
+            miscal_area_pre_cal_std=("miscal_area_pre_cal", "std"),
         )
         .reset_index()
         .fillna(0)
     )
-    for metric in ["mae", "ktau", "r2"]:
+    for metric in ["mae", "ktau", "r2", "miscal_area", "miscal_area_pre_cal"]:
         learning_curve_summary[f"{metric}_lower"] = (
             learning_curve_summary[f"{metric}_mean"]
             - learning_curve_summary[f"{metric}_std"]
@@ -403,6 +409,16 @@ def main() -> None:
 
     print(f"\nMiscalibration Area Before: {final_state['miscal_area_pre_cal']:.4f}")
     print(f"Miscalibration Area After:  {final_state['miscal_area']:.4f}")
+
+    # ── Calibration area per iteration ─────────────────────────────────────────────
+    print("Generating calibration area per iteration plot...")
+    fig = alp.plot_calibration_area_per_iteration(
+        learning_curve_summary,
+        strategy_order=cfg.strategies,
+        color_map=STRATEGY_COLORS,
+    )
+    fig.write_html("results/calibration_area_per_iteration.html")
+    _plotly_pngs.append((fig, "results/calibration_area_per_iteration.png"))
 
     # ── Batch PNG export (single kaleido process) ──────────────────────────────────
     print(f"\nExporting {len(_plotly_pngs)} Plotly figures to PNG...")
