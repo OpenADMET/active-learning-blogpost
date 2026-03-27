@@ -139,19 +139,17 @@ Run `python analysis.py` to regenerate all figures. They are written to `results
 
 [![Learning curves — Kendall's τ (click for interactive version)](results/learning_curve_ktau.png)](results/learning_curve_ktau.html)
 
-As expected, **EI** and **UCB** outperform **Random** sampling significantly in the early iterations (100–250 labeled molecules). The gap narrows as the pool grows, but the "area under the learning curve" advantage for active learning is substantial.
+The most striking result is that all six strategies are essentially indistinguishable: they reach the same terminal MAE and Kendall's τ and follow nearly identical trajectories across every iteration. The choice of acquisition function — sophisticated or naive — barely moves the needle on predictive accuracy.
 
-**Exploitation** initially improves fast but often plateaus or degrades slightly because it over-samples a single chemical series (the "greedy" trap), failing to explore the diversity of the scaffold split.
-
-**Exploration** behaves as a pure uncertainty oracle: it queries regions where the model is most confused, which drives rapid improvement early on but eventually saturates once the model has adequate coverage. Without any signal from predicted activity it can waste queries on low-activity regions.
-
-**Diversity** enforces structural dissimilarity at every step, spreading labels uniformly across chemical space. This prevents the committee from over-committing to a single scaffold and tends to produce well-calibrated models, but it can be slow to find potent hits because it ignores predicted activity entirely.
+This is likely a consequence of CheMeleon's pretraining. When the base representation is already well-suited to the task, the model extracts near-maximum information from almost any labeled set, and the marginal value of *which* compounds to label diminishes. Active learning's label-efficiency advantage is most pronounced when the base model is data-hungry; here, the foundation model's inductive bias dominates.
 
 Crucially, even at $N=100$, the MAE is reasonable (~0.7–0.8), thanks to CheMeleon's pretraining. A randomly initialized model would likely be much worse.
 
 ### Hit discovery
 
 [![Hit discovery curve (click for interactive version)](results/hit_discovery_curve.png)](results/hit_discovery_curve.html)
+
+Where the strategies *do* diverge is in hit-finding. **Exploitation** and **UCB** recover all but one of the actives in the pool, reflecting their shared bias toward high predicted pEC50 — they converge on the potent region of chemical space efficiently. **EI**, **Random**, and **Diversity** recover a similar but slightly smaller fraction, with EI's explore–exploit balance offering no clear advantage over random at this scale. **Exploration** finds the fewest actives: by ignoring predicted activity entirely and querying only by uncertainty, it maps the epistemic landscape of the model rather than the activity landscape of the assay, spending queries on uninformative regions.
 
 ## Navigating chemical space with GTM
 
@@ -177,17 +175,22 @@ We evaluate calibration using the **miscalibration area**. A perfectly calibrate
 
 [![Uncertainty calibration curve before and after scaling-factor calibration (click for interactive version)](results/calibration_curve.png)](results/calibration_curve.html)
 
-The plot shows how scaling-factor calibration pulls the calibration curve closer to the diagonal. For early-stage AL, this ensures that the acquisition function (which relies on $\sigma$) is making decisions based on realistic uncertainty estimates, preventing the model from ignoring "unknown unknowns."
+[![Miscalibration area per iteration — before and after calibration (click for interactive version)](results/calibration_area_per_iteration.png)](results/calibration_area_per_iteration.html)
+
+The miscalibration area is nearly identical before and after applying the scaling-factor calibration, and it remains flat across all AL iterations. This is not a failure of the calibration method, but a structural consequence of distribution shift: the scaling factor is fit on a holdout of the *AL-acquired pool*, then evaluated on a scaffold-split test set. Miscalibration on structurally novel scaffolds has a systematically different character from miscalibration on the explored pool, so a global scale correction learned on pool compounds does not transfer. A more flexible method such as isotonic regression would not resolve this either — a calibrator trained on one region of chemical space and applied to another is inherently limited regardless of its flexibility.
+
+The flat trajectory also tells us that the committee's uncertainty structure is essentially fixed by the model architecture and training procedure; more labeled data does not change how the ensemble disagrees. This is expected for deep ensembles trained with bootstrap bagging, where all members share the same inductive bias.
+
+The more informative diagnostic for active learning is whether σ *correlates* with actual prediction error — a ranking question that can be assessed with Spearman ρ between σ and |error|. Absolute coverage (the calibration curve area) is less meaningful when the calibration and evaluation distributions are separated by design.
 
 ## Takeaways
 
-1. **Efficiency**: **EI** and **UCB** consistently reach performance milestones with fewer labels than random sampling. In this simulation, EI often reaches the target MAE with 20–30% fewer compounds.
-2. **Exploitation is risky**: Pure greedy strategies converge fast but often stagnate. They find local maxima but fail to learn the global SAR.
-3. **Exploration covers unknowns**: Sampling purely by uncertainty ($\sigma$) maps the epistemic landscape quickly but wastes queries on inactive regions once the model matures. It serves as a useful diagnostic — if **Exploration** outperforms **EI**, the committee is under-exploring and would benefit from a higher $\beta$ or $\xi$.
-4. **Diversity ensures coverage**: GTM-based max-min selection prevents scaffold collapse and produces the most structurally diverse labeled set. It is the safest strategy when potency information is completely absent, but it sacrifices hit-finding speed.
-5. **Foundation Models matter**: CheMeleon provides a strong prior. Even with $N=100$, the models are performant. Active learning is most effective when the base model is already capable of reasoning about chemical structure.
-6. **Calibration is (almost) free**: Post-hoc uncertainty calibration significantly improves reliability without retraining, which is crucial for safety-critical decision making, but does require a held-out calibration set.
-7. **Recommendation**: For early-stage screening, use **EI**. It naturally balances finding hits (for the project team) and learning the SAR (for the model). Once you have >300 labels and the model is stable, you might switch to pure exploitation or standard screening.
+1. **Foundation models flatten label-efficiency gaps**: All strategies reach the same terminal accuracy along nearly identical trajectories. CheMeleon's pretraining dominates — when the base representation is already informative, *which* compounds you label matters far less than *how many*.
+2. **Hit-finding and model accuracy are separable**: Exploitation and UCB recover nearly all actives in the pool despite no accuracy advantage over Random. The acquisition function shapes *what* the model finds, not *how well* it predicts.
+3. **Exploration is a poor hit-finder**: Sampling purely by uncertainty ($\sigma$) maps the epistemic landscape of the model but ignores the activity landscape of the assay, spending queries on uninformative low-activity regions. It is best understood as a diagnostic: if Exploration outperforms EI, the committee is under-exploring.
+4. **Diversity ensures coverage**: GTM-based max-min selection prevents scaffold collapse and produces the most structurally diverse labeled set. It is the safest strategy when potency information is completely absent, but sacrifices hit-finding speed.
+5. **Calibration does not transfer across the scaffold split**: The scaling-factor calibration leaves the miscalibration area unchanged because the calibrator is fit on AL-acquired pool compounds and evaluated on structurally distinct test scaffolds. This is an inherent limitation of post-hoc calibration under distribution shift, not a failure of the method. The uncertainty estimates are still useful for acquisition (relative ordering is preserved), but their absolute coverage on unseen scaffolds should not be trusted.
+6. **Recommendation**: For early-stage hit-finding, use **Exploitation** or **UCB** — they find the most actives. For building a generalizable SAR model, all strategies perform equivalently; **Random** is a perfectly defensible baseline. Use **Diversity** only when structural coverage is the explicit goal.
 
 ## Limitations and next steps
 
