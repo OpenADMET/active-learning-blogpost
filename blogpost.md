@@ -2,7 +2,7 @@
 
 In drug discovery, the most valuable resource isn't compute, it's data. Synthesizing and assaying a single compound can cost thousands of dollars and take weeks. Yet, most machine learning models are trained as if labels are free, consuming massive random splits of [ChEMBL](https://www.ebi.ac.uk/chembl/) or [Enamine Real](https://enamine.net/compound-collections/real-compounds/real-database).
 
-[**Active learning (AL)**](https://en.wikipedia.org/wiki/Active_learning_(machine_learning)) flips this paradigm. Instead of passively accepting a training set, the model iteratively selects the compounds it finds most confusing (to "explore") or promising (to "exploit"). In this post, we demonstrate how to build an active learning loop using [`openadmet-models`](https://github.com/OpenADMET/openadmet-models), powered by the [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) foundation model. We'll simulate a campaign to find compounds active against the [Pregnane X Receptor (PXR)](https://en.wikipedia.org/wiki/Pregnane_X_receptor), starting with just 100 labeled molecules. By leveraging uncertainty quantification and smart acquisition strategies like expected improvement (EI) and upper confidence bound (UCB), we show that we can reach high predictive accuracy with a fraction of the data required by random screening.
+[**Active learning (AL)**](https://en.wikipedia.org/wiki/Active_learning_(machine_learning)) flips this paradigm. Instead of passively accepting a training set, the model iteratively selects the compounds it finds most confusing (to "explore") or promising (to "exploit"). In this post, we demonstrate how to build an active learning loop using [`openadmet-models`](https://github.com/OpenADMET/openadmet-models), powered by the [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) foundation model. We'll simulate a campaign to find compounds active against the [Pregnane X Receptor (PXR)](https://en.wikipedia.org/wiki/Pregnane_X_receptor), bootstrapped from ~600 ChEMBL-derived labels and selecting 100 new compounds per iteration for 20 iterations. By leveraging uncertainty quantification and smart acquisition strategies like expected improvement (EI) and upper confidence bound (UCB), we show that we can reach high predictive accuracy with a fraction of the data required by random screening.
 
 ## Why PXR?
 
@@ -12,7 +12,7 @@ PXR is a ligand-activated nuclear transcription factor that functions as the bod
 
 A typical high-throughput screening (HTS) campaign might screen 100,000 compounds, but for lead optimization, we often work with much smaller datasets (hundreds to low thousands). When training predictive models on such small data, the choice of training points matters immensely. A model trained on 100 diverse, informative compounds will outperform one trained on 100 redundant analogues.
 
-Active learning formalizes this intuition. We start with a small "seed" dataset, train an ensemble of models, and then use their consensus (mean) and disagreement (standard deviation) to query a large, unlabeled pool. This is often called [**query-by-committee (QBC)**](https://dl.acm.org/doi/10.1145/130385.130417).
+Active learning formalizes this intuition. We start with an external "seed" dataset of ~600 ChEMBL-derived PXR measurements to give the committee a meaningful prior, then use their consensus (mean) and disagreement (standard deviation) to query a large, unlabeled pool. This is often called [**query-by-committee (QBC)**](https://dl.acm.org/doi/10.1145/130385.130417).
 
 Here, we combine QBC with [**CheMeleon**](https://github.com/JacksonBurns/chemeleon), a graph neural network pretrained on millions of molecules. CheMeleon provides a robust chemical representation even when task-specific labels are scarce, making it an ideal backbone for low-data active learning.
 
@@ -27,15 +27,22 @@ All supporting code lives in `src/`: [src/helpers.py](src/helpers.py) contains t
 
 ## Configuration
 
-The campaign is governed by five parameters, set at the top of `run.py`:
+The campaign is governed by a handful of parameters in `config.yaml`:
 
-```python
-N_START  = 100   # initial labeled pool size
-M_QUERY  = 20    # molecules queried per AL iteration
-K_ITER   = 15    # number of AL iterations
-N_MODELS = 5     # committee size (ensemble members)
-SEED     = 42    # global random seed
+```yaml
+active_learning:
+  k_iter: 20       # number of AL iterations per run
+  query_size: 100  # compounds selected from the pool per iteration
+  n_start: 0       # no initial pool seeding — seed data is used instead
+  seeds: [42, 43, 44, 45, 46]
+
+training:
+  n_models: 5      # committee size (ensemble members)
 ```
+
+The `n_start: 0` setting means no compounds are drawn from the unlabeled pool at the start. Instead, the committee is initialized on an external ChEMBL pretraining set of ~600 PXR-activity measurements (`seed_data_path` in `config.yaml`), which is always included in training but never queried or evaluated. This reflects a realistic scenario where historical data is available from the literature or a public database but the prospective assay set has not yet been touched.
+
+The `query_size` of 100 compounds is grounded in experimental throughput: a standard 1536-well microplate can accommodate roughly 100 compounds when each requires a ~13-point dose-response curve to derive a pEC50 value — one full plate worth of data per AL iteration.
 
 Six acquisition strategies are compared: **EI**, **UCB**, **Random**, **Exploitation**, **Exploration**, and **Diversity**.
 
@@ -43,7 +50,7 @@ Six acquisition strategies are compared: **EI**, **UCB**, **Random**, **Exploita
 
 Running a full active learning benchmark is computationally intensive because we retrain the model from scratch at every iteration to simulate a real campaign, repeated for each selection strategy to compare them.
 
-With $k=15$ iterations and 6 strategies, we are performing $15 \times 6 = 90$ full training runs. Each run trains a committee of 5 models. On a standard GPU (e.g. T4 or A10), `run.py` might take several hours to complete. If you want a quick preview, reduce `K_ITER` to `5` (with higher `M_QUERY`) and `N_MODELS` to `3`.
+With $k=20$ iterations and 6 strategies, we are performing $20 \times 6 = 120$ full training runs. Each run trains a committee of 5 models. On a standard GPU (e.g. T4 or A10), `run.py` might take several hours to complete. If you want a quick preview, reduce `k_iter` to `5` and `n_models` to `3` in `config.yaml`.
 
 **Note:** The [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) weights (~34MB) will be downloaded from [Zenodo](https://zenodo.org/records/15460715) automatically upon the first run.
 
@@ -141,9 +148,9 @@ Run `python analysis.py` to regenerate all figures. They are written to `results
 
 The strategies converge to similar but not identical terminal performance. On MAE, **Exploitation** is the weakest at 0.55, **UCB** improves slightly to 0.54, and the remaining four strategies — **EI**, **Random**, **Exploration**, and **Diversity** — all land at 0.52. The differences are small, but the pattern is telling: the two strategies that most aggressively target high predicted pEC50 (Exploitation and UCB) pay a modest accuracy penalty, likely because they concentrate labels in a narrow region of chemical space and leave the rest of the SAR undersampled. On Kendall's τ all methods are indistinguishable at ~0.53, meaning the rank-ordering of predictions is equally good regardless of how compounds were selected.
 
-This is likely a consequence of CheMeleon's pretraining. When the base representation is already well-suited to the task, the model extracts near-maximum information from almost any labeled set, and the marginal value of *which* compounds to label diminishes. Active learning's label-efficiency advantage is most pronounced when the base model is data-hungry; here, the foundation model's inductive bias dominates.
+This is likely a consequence of CheMeleon's pretraining and the large per-iteration batch size. When the base representation is already well-suited to the task, the model extracts near-maximum information from almost any labeled set, and the marginal value of *which* compounds to label diminishes. The 100-compound query batch compounds this further: selecting 100 molecules at once is a coarse-grained update that gives every strategy substantial coverage of chemical space at each step, leaving little room for a smarter selector to pull ahead. Active learning's label-efficiency advantage is most pronounced when the base model is data-hungry and queries are small relative to the pool.
 
-Crucially, even at $N=100$, the MAE is reasonable (~0.7–0.8), thanks to CheMeleon's pretraining. A randomly initialized model would likely be much worse.
+Crucially, even at the start of the campaign — armed only with the ~600 ChEMBL pretraining labels — the MAE is reasonable (~0.7–0.8), thanks to CheMeleon's pretraining. A randomly initialized model would likely be much worse.
 
 ### Hit discovery
 
@@ -185,7 +192,7 @@ The more informative diagnostic for active learning is whether σ *correlates* w
 
 ## Takeaways
 
-1. **Foundation models flatten label-efficiency gaps**: Strategies converge to near-identical terminal accuracy — all within 0.03 MAE of each other. Exploitation-heavy strategies (Exploitation, UCB) pay a small accuracy penalty by concentrating labels in a narrow region; the remaining strategies all reach 0.52 MAE and ~0.53 Kendall's τ. CheMeleon's pretraining dominates: *which* compounds you label matters far less than *how many*.
+1. **Foundation models and large batches flatten label-efficiency gaps**: Strategies converge to near-identical terminal accuracy — all within 0.03 MAE. Exploitation-heavy strategies pay a small accuracy penalty by concentrating labels in a narrow region; the rest reach 0.52 MAE and ~0.53 Kendall's τ. Two factors suppress the advantage of smarter acquisition: CheMeleon's pretraining means any reasonable labeled set produces a capable model, and a 100-compound batch per iteration is a coarse enough update that fine-grained selection strategy differences wash out.
 2. **Hit-finding and model accuracy are separable**: Exploitation and UCB recover nearly all actives in the pool despite no accuracy advantage over Random. The acquisition function shapes *what* the model finds, not *how well* it predicts.
 3. **Exploration is a poor hit-finder**: Sampling purely by uncertainty ($\sigma$) maps the epistemic landscape of the model but ignores the activity landscape of the assay, spending queries on uninformative low-activity regions. It is best understood as a diagnostic: if Exploration outperforms EI, the committee is under-exploring.
 4. **Diversity ensures coverage**: GTM-based max-min selection prevents scaffold collapse and produces the most structurally diverse labeled set. It is the safest strategy when potency information is completely absent, but sacrifices hit-finding speed.
