@@ -139,7 +139,7 @@ Run `python analysis.py` to regenerate all figures. They are written to `results
 
 [![Learning curves — Kendall's τ (click for interactive version)](results/learning_curve_ktau.png)](results/learning_curve_ktau.html)
 
-The most striking result is that all six strategies are essentially indistinguishable: they reach the same terminal MAE and Kendall's τ and follow nearly identical trajectories across every iteration. The choice of acquisition function — sophisticated or naive — barely moves the needle on predictive accuracy.
+The strategies converge to similar but not identical terminal performance. On MAE, **Exploitation** is the weakest at 0.55, **UCB** improves slightly to 0.54, and the remaining four strategies — **EI**, **Random**, **Exploration**, and **Diversity** — all land at 0.52. The differences are small, but the pattern is telling: the two strategies that most aggressively target high predicted pEC50 (Exploitation and UCB) pay a modest accuracy penalty, likely because they concentrate labels in a narrow region of chemical space and leave the rest of the SAR undersampled. On Kendall's τ all methods are indistinguishable at ~0.53, meaning the rank-ordering of predictions is equally good regardless of how compounds were selected.
 
 This is likely a consequence of CheMeleon's pretraining. When the base representation is already well-suited to the task, the model extracts near-maximum information from almost any labeled set, and the marginal value of *which* compounds to label diminishes. Active learning's label-efficiency advantage is most pronounced when the base model is data-hungry; here, the foundation model's inductive bias dominates.
 
@@ -185,7 +185,7 @@ The more informative diagnostic for active learning is whether σ *correlates* w
 
 ## Takeaways
 
-1. **Foundation models flatten label-efficiency gaps**: All strategies reach the same terminal accuracy along nearly identical trajectories. CheMeleon's pretraining dominates — when the base representation is already informative, *which* compounds you label matters far less than *how many*.
+1. **Foundation models flatten label-efficiency gaps**: Strategies converge to near-identical terminal accuracy — all within 0.03 MAE of each other. Exploitation-heavy strategies (Exploitation, UCB) pay a small accuracy penalty by concentrating labels in a narrow region; the remaining strategies all reach 0.52 MAE and ~0.53 Kendall's τ. CheMeleon's pretraining dominates: *which* compounds you label matters far less than *how many*.
 2. **Hit-finding and model accuracy are separable**: Exploitation and UCB recover nearly all actives in the pool despite no accuracy advantage over Random. The acquisition function shapes *what* the model finds, not *how well* it predicts.
 3. **Exploration is a poor hit-finder**: Sampling purely by uncertainty ($\sigma$) maps the epistemic landscape of the model but ignores the activity landscape of the assay, spending queries on uninformative low-activity regions. It is best understood as a diagnostic: if Exploration outperforms EI, the committee is under-exploring.
 4. **Diversity ensures coverage**: GTM-based max-min selection prevents scaffold collapse and produces the most structurally diverse labeled set. It is the safest strategy when potency information is completely absent, but sacrifices hit-finding speed.
