@@ -165,7 +165,9 @@ def plot_hit_discovery_curve(
         .reset_index()
         .fillna({"n_hits_std": 0})
     )
-    hits_summary["n_hits_lower"] = hits_summary["n_hits_mean"] - hits_summary["n_hits_std"]
+    hits_summary["n_hits_lower"] = (
+        hits_summary["n_hits_mean"] - hits_summary["n_hits_std"]
+    )
     hits_summary["n_hits_upper"] = np.minimum(
         hits_summary["n_hits_mean"] + hits_summary["n_hits_std"], max_hits
     )
@@ -298,7 +300,7 @@ def plot_calibration_curve_before_after(
             y=observed_before,
             mode="lines",
             name=label_before,
-            line=dict(color="#d62728", width=2),
+            line=dict(color="#D62728", width=2),
             fill="tonexty",
             fillcolor="rgba(214,39,40,0.1)",
         )
@@ -322,9 +324,9 @@ def plot_calibration_curve_before_after(
             y=observed_after,
             mode="lines",
             name=label_after,
-            line=dict(color="#2ca02c", width=2),
+            line=dict(color="#1f77b4", width=2),
             fill="tonexty",
-            fillcolor="rgba(44,160,44,0.1)",
+            fillcolor="rgba(31,119,180,0.1)",
         )
     )
 
@@ -806,6 +808,106 @@ def plot_calibration_area_per_iteration(
         legend_title="Strategy",
         xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
         yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        plot_bgcolor="white",
+        width=width,
+        height=height,
+    )
+    return fig
+
+
+def plot_sigma_error_correlation(
+    summary_df: pd.DataFrame,
+    strategy_order: list[str],
+    color_map: dict | None = None,
+    width: int = 700,
+    height: int = 450,
+) -> go.Figure:
+    """Spearman ρ(σ, |error|) vs. labeled pool size for each strategy.
+
+    A positive ρ indicates that the ensemble's predicted standard deviation σ
+    correctly ranks test compounds by how wrong the model is — i.e. high-σ
+    compounds tend to have larger absolute prediction errors. This is a more
+    informative diagnostic than calibration-curve area when calibration and
+    evaluation distributions differ (e.g. scaffold-split holdouts).
+
+    Parameters
+    ----------
+    summary_df : pd.DataFrame
+        Must have columns: ``strategy``, ``n_labeled``,
+        ``sigma_error_rho_mean``, ``sigma_error_rho_lower``,
+        ``sigma_error_rho_upper``.
+    strategy_order : list[str]
+        Strategies to plot, controls legend order.
+    color_map : dict or None, optional
+        Mapping of strategy name to CSS color string.
+    width, height : int, optional
+        Figure dimensions in pixels.
+
+    Returns
+    -------
+    go.Figure
+    """
+    fig = go.Figure()
+
+    # y = 0 reference line
+    fig.add_hline(y=0, line=dict(color="rgba(0,0,0,0.3)", width=1, dash="dash"))
+
+    for strategy in strategy_order:
+        df_sub = summary_df[summary_df["strategy"] == strategy].sort_values("n_labeled")
+        if df_sub.empty:
+            continue
+
+        color = color_map.get(strategy, None) if color_map else None
+        fill_color = _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
+
+        # Upper bound — invisible, anchors fill
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["sigma_error_rho_upper"],
+                mode="lines",
+                line=dict(width=0),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        # Lower bound — fills back to upper
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["sigma_error_rho_lower"],
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor=fill_color,
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        # Mean line
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["sigma_error_rho_mean"],
+                mode="lines",
+                name=strategy,
+                legendgroup=strategy,
+                showlegend=True,
+                line=dict(width=2, color=color),
+            )
+        )
+
+    fig.update_layout(
+        xaxis_title="Number of Labeled Molecules",
+        yaxis_title="Spearman ρ(σ, |error|)",
+        legend_title="Strategy",
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.1)",
+            gridwidth=1,
+            # range=[-0.1, 0.3],
+        ),
         plot_bgcolor="white",
         width=width,
         height=height,
