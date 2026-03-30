@@ -253,7 +253,7 @@ def plot_calibration_curve_before_after(
     observed_after: np.ndarray,
     label_before="Before calibration",
     label_after="After calibration",
-    width: int = 500,
+    width: int = 620,
     height: int = 500,
 ) -> go.Figure:
     """
@@ -349,6 +349,8 @@ def plot_calibration_curve_before_after(
             range=[0, 1],
             showgrid=True,
             gridcolor="rgba(0,0,0,0.1)",
+            scaleanchor="x",
+            scaleratio=1,
         ),
         plot_bgcolor="white",
         width=width,
