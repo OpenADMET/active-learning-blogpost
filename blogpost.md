@@ -127,18 +127,9 @@ Run `python run.py` to execute the loop for all six strategies with a fixed seed
 
 The checkpoint stores the full per-iteration history for each strategy (test-set metrics, labeled pool snapshot, selected pool indices) together with the pre-fitted GTM coordinates, the scaffold-split DataFrames (`df_pool`, `df_test`), the optional external seed data (`df_seed`), and the campaign configuration. This self-contained payload means `analysis.py` needs no access to the original dataset.
 
-## Unpacking results
-
-`analysis.py` unpacks the nested `all_runs` dictionary into two tidy long-format DataFrames before plotting:
-
-- **`learning_curve_long`** — one row per (strategy, iteration), carrying the test-set metrics (MAE, R², Kendall's τ, Spearman ρ) and the labeled-pool size `n_labeled`.
-- **`pool_history_long`** — one row per (strategy, iteration, compound), recording the pEC50 of every molecule in the labeled pool at each iteration. This lets us track how the distribution of acquired labels shifts over the course of the campaign — a window into *what* each strategy is choosing to label, not just *how well* the model performs.
-
-Because this experiment uses a **single random seed**, there is no cross-seed variance to collapse. `learning_curve_summary` is constructed by renaming the raw metric columns to the `_mean` suffix expected by the plotting functions, then duplicating those values as `_lower` and `_upper` confidence bounds — effectively zero-width bands. This keeps all downstream plotting calls compatible with the multi-seed band-plot API without requiring any changes to the plot helpers.
-
 ## Results
 
-Run `python analysis.py` to regenerate all figures. They are written to `results/` as self-contained interactive HTML files.
+Run `python analysis.py` to generate all figures. They are written to `results/` as self-contained interactive HTML files and static SVGs.
 
 ### Learning curves
 
@@ -172,7 +163,7 @@ Use the slider to step through iterations manually, or press **▶ Play** to wat
 
 [![Exploitation compound selection in GTM chemical space — final state colored by iteration (click for interactive animation)](results/gtm_selection_animation_exploitation.svg)](results/gtm_selection_animation_exploitation.html)
 
-[![Active learning selection in TMAP chemical space, EI strategy (click for interactive version)](results/tmap_selection.png)](results/tmap_selection.html)
+[![Active learning selection in TMAP chemical space, EI strategy (click for interactive version)](results/tmap_selection.svg)](results/tmap_selection.html)
 
 ## Are our uncertainties trustworthy?
 
