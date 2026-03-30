@@ -57,6 +57,7 @@ def plot_learning_curve_with_bands(
                 y=df_sub[f"{metric_col}_upper"],
                 mode="lines",
                 line=dict(width=0),
+                legendgroup=strategy,
                 showlegend=False,
                 hoverinfo="skip",
                 **({"line_color": color} if color else {}),
@@ -73,6 +74,7 @@ def plot_learning_curve_with_bands(
                 fillcolor=(
                     _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
                 ),
+                legendgroup=strategy,
                 showlegend=False,
                 hoverinfo="skip",
             )
@@ -84,6 +86,7 @@ def plot_learning_curve_with_bands(
                 y=df_sub[f"{metric_col}_mean"],
                 mode="lines",
                 name=strategy,
+                legendgroup=strategy,
                 line=dict(width=2, color=color),
             )
         )
@@ -189,6 +192,7 @@ def plot_hit_discovery_curve(
                 y=df_sub["n_hits_upper"],
                 mode="lines",
                 line=dict(width=0),
+                legendgroup=strategy,
                 showlegend=False,
                 hoverinfo="skip",
                 **({"line_color": color} if color else {}),
@@ -205,6 +209,7 @@ def plot_hit_discovery_curve(
                 fillcolor=(
                     _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
                 ),
+                legendgroup=strategy,
                 showlegend=False,
                 hoverinfo="skip",
             )
@@ -216,6 +221,7 @@ def plot_hit_discovery_curve(
                 y=df_sub["n_hits_mean"],
                 mode="lines",
                 name=strategy,
+                legendgroup=strategy,
                 line=dict(width=2, color=color),
             )
         )
@@ -772,6 +778,7 @@ def plot_calibration_area_per_iteration(
                     y=df_sub[f"{prefix}_upper"],
                     mode="lines",
                     line=dict(width=0),
+                    legendgroup=f"{strategy}{label_suffix}",
                     showlegend=False,
                     hoverinfo="skip",
                 )
@@ -785,6 +792,7 @@ def plot_calibration_area_per_iteration(
                     line=dict(width=0),
                     fill="tonexty",
                     fillcolor=fill_color,
+                    legendgroup=f"{strategy}{label_suffix}",
                     showlegend=False,
                     hoverinfo="skip",
                 )
@@ -867,6 +875,7 @@ def plot_sigma_error_correlation(
                 y=df_sub["sigma_error_rho_upper"],
                 mode="lines",
                 line=dict(width=0),
+                legendgroup=strategy,
                 showlegend=False,
                 hoverinfo="skip",
             )
@@ -880,6 +889,7 @@ def plot_sigma_error_correlation(
                 line=dict(width=0),
                 fill="tonexty",
                 fillcolor=fill_color,
+                legendgroup=strategy,
                 showlegend=False,
                 hoverinfo="skip",
             )
