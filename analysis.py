@@ -10,12 +10,12 @@ Usage
     python analysis.py
 
 Generated outputs (written to ``results/``)::
-    learning_curve_mae.html / .png            — MAE learning curves per strategy
-    learning_curve_ktau.html / .png           — Kendall’s τ learning curves per strategy
-    hit_discovery_curve.html / .png           — cumulative hits vs. labeled-pool size
-    gtm_selection_animation_exploitation.html / .png — animated GTM (Exploitation)
+    learning_curve_mae.html / .svg            — MAE learning curves per strategy
+    learning_curve_ktau.html / .svg           — Kendall’s τ learning curves per strategy
+    hit_discovery_curve.html / .svg           — cumulative hits vs. labeled-pool size
+    gtm_selection_animation_exploitation.html / .svg — animated GTM (Exploitation)
     tmap_selection.html / .png                — interactive TMAP (EI, via Faerun)
-    calibration_curve.html / .png             — before/after isotonic calibration
+    calibration_curve.html / .svg             — before/after isotonic calibration
 
 Requires ``kaleido`` for PNG export (``pip install kaleido``).
 """
@@ -224,9 +224,9 @@ def main() -> None:
 
     Path("results").mkdir(exist_ok=True)
 
-    # Accumulate (fig, png_path) pairs; all PNG writes are batched at the end in a
+    # Accumulate (fig, svg_path) pairs; all SVG writes are batched at the end in a
     # single Kaleido() session to avoid spawning a new subprocess per figure.
-    _plotly_pngs: list[tuple] = []
+    _plotly_svgs: list[tuple] = []
 
     # ── Learning curves ────────────────────────────────────────────────────────────
     print("Generating learning curve (MAE)...")
@@ -238,7 +238,7 @@ def main() -> None:
         color_map=STRATEGY_COLORS,
     )
     fig.write_html("results/learning_curve_mae.html")
-    _plotly_pngs.append((fig, "results/learning_curve_mae.png"))
+    _plotly_svgs.append((fig, "results/learning_curve_mae.svg"))
 
     print("Generating learning curve (Kendall's τ)...")
     fig = alp.plot_learning_curve_with_bands(
@@ -249,7 +249,7 @@ def main() -> None:
         color_map=STRATEGY_COLORS,
     )
     fig.write_html("results/learning_curve_ktau.html")
-    _plotly_pngs.append((fig, "results/learning_curve_ktau.png"))
+    _plotly_svgs.append((fig, "results/learning_curve_ktau.svg"))
 
     # ── Hit discovery curve ────────────────────────────────────────────────────────
     print("Generating hit discovery curve...")
@@ -264,7 +264,7 @@ def main() -> None:
         color_map=STRATEGY_COLORS,
     )
     fig.write_html("results/hit_discovery_curve.html")
-    _plotly_pngs.append((fig, "results/hit_discovery_curve.png"))
+    _plotly_svgs.append((fig, "results/hit_discovery_curve.svg"))
 
     # ── GTM selection animation ────────────────────────────────────────────────────
     _method = "Exploitation"
@@ -324,7 +324,7 @@ def main() -> None:
     _sm.set_array([])
     fig_gtm_static.colorbar(_sm, ax=ax_gtm, label="AL Iteration")
     fig_gtm_static.savefig(
-        f"results/gtm_selection_animation_{_method.lower()}.png",
+        f"results/gtm_selection_animation_{_method.lower()}.svg",
         dpi=150,
         bbox_inches="tight",
     )
@@ -384,7 +384,7 @@ def main() -> None:
     )
     _tsm.set_array([])
     fig_tmap_static.colorbar(_tsm, ax=ax_tmap, label="AL Iteration (EI)")
-    fig_tmap_static.savefig("results/tmap_selection.png", dpi=150, bbox_inches="tight")
+    fig_tmap_static.savefig("results/tmap_selection.png", dpi=600, bbox_inches="tight")
     plt.close(fig_tmap_static)
 
     # ── Calibration ────────────────────────────────────────────────────────────────
@@ -405,7 +405,7 @@ def main() -> None:
 
     fig = alp.plot_calibration_curve_before_after(exp_pre, obs_pre, exp_post, obs_post)
     fig.write_html("results/calibration_curve.html")
-    _plotly_pngs.append((fig, "results/calibration_curve.png"))
+    _plotly_svgs.append((fig, "results/calibration_curve.svg"))
 
     print(f"\nMiscalibration Area Before: {final_state['miscal_area_pre_cal']:.4f}")
     print(f"Miscalibration Area After:  {final_state['miscal_area']:.4f}")
@@ -418,14 +418,14 @@ def main() -> None:
         color_map=STRATEGY_COLORS,
     )
     fig.write_html("results/calibration_area_per_iteration.html")
-    _plotly_pngs.append((fig, "results/calibration_area_per_iteration.png"))
+    _plotly_svgs.append((fig, "results/calibration_area_per_iteration.svg"))
 
     # ── Batch PNG export (single kaleido process) ──────────────────────────────────
-    print(f"\nExporting {len(_plotly_pngs)} Plotly figures to PNG...")
+    print(f"\nExporting {len(_plotly_svgs)} Plotly figures to PNG...")
 
     async def _export_pngs():
         async with Kaleido() as k:
-            for _fig, _png_path in _plotly_pngs:
+            for _fig, _png_path in _plotly_svgs:
                 await k.write_fig(_fig, _png_path)
                 print(f"  saved {_png_path}")
 
