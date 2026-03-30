@@ -14,10 +14,10 @@ Generated outputs (written to ``results/``)::
     learning_curve_ktau.html / .svg           — Kendall’s τ learning curves per strategy
     hit_discovery_curve.html / .svg           — cumulative hits vs. labeled-pool size
     gtm_selection_animation_exploitation.html / .svg — animated GTM (Exploitation)
-    tmap_selection.html / .png                — interactive TMAP (EI, via Faerun)
-    calibration_curve.html / .svg             — before/after isotonic calibration
+    tmap_selection.html / .svg                — interactive TMAP (Exploitation, via Faerun)
+    calibration_curve.html / .svg             — before/after scaling factor calibration
 
-Requires ``kaleido`` for PNG export (``pip install kaleido``).
+Requires ``kaleido`` for SVG export (``pip install kaleido``).
 """
 
 import asyncio
@@ -339,7 +339,7 @@ def main() -> None:
         tmap_layout,
         n_background=0,
         smiles_list=df_pool["smiles"].values,
-        selection_history=all_runs["EI"][0]["history"],
+        selection_history=all_runs["Exploitation"][0]["history"],
         point_scale=3,
         background_point_scale=1,
         title="Active Learning Selection (TMAP)",
@@ -350,21 +350,24 @@ def main() -> None:
     # Static TMAP snapshot colored by AL iteration
     print("Generating static TMAP snapshot...")
     _tx, _ty, _ts, _tt = tmap_layout
-    _ei_history = all_runs["EI"][0]["history"]
-    _ei_iters = sorted({s["iteration"] for s in _ei_history})
-    _ei_iter_to_cat = {it: idx + 1 for idx, it in enumerate(_ei_iters)}
-    _n_ei_iter = len(_ei_iters)
+    _exploitation_history = all_runs["Exploitation"][0]["history"]
+    _exploitation_iters = sorted({s["iteration"] for s in _exploitation_history})
+    _exploitation_iter_to_cat = {
+        it: idx + 1 for idx, it in enumerate(_exploitation_iters)
+    }
+    _n_exploitation_iter = len(_exploitation_iters)
     _ct = np.zeros(len(_tx), dtype=int)
-    for _state in _ei_history:
+    for _state in _exploitation_history:
         for _idx in _state["selected_pool_indices"]:
             if _ct[_idx] == 0:
-                _ct[_idx] = _ei_iter_to_cat[_state["iteration"]]
+                _ct[_idx] = _exploitation_iter_to_cat[_state["iteration"]]
     _tmap_base_cmap = mcm.get_cmap("viridis")
     _tmap_colors = [(0.75, 0.75, 0.75, 0.15)] + [
-        _tmap_base_cmap(i / max(_n_ei_iter - 1, 1)) for i in range(_n_ei_iter)
+        _tmap_base_cmap(i / max(_n_exploitation_iter - 1, 1))
+        for i in range(_n_exploitation_iter)
     ]
     _tmap_point_colors = [_tmap_colors[ci] for ci in _ct]
-    fig_tmap_static, ax_tmap = plt.subplots(figsize=(10, 10))
+    fig_tmap_static, ax_tmap = plt.subplots(figsize=(4, 4))
     for _si, _ti in zip(_ts, _tt):
         ax_tmap.plot(
             [_tx[_si], _tx[_ti]],
@@ -380,17 +383,18 @@ def main() -> None:
     fig_tmap_static.patch.set_facecolor("white")
     ax_tmap.set_box_aspect(1)
     _tsm = plt.cm.ScalarMappable(
-        cmap=_tmap_base_cmap, norm=mcolors.Normalize(vmin=0, vmax=_n_ei_iter - 1)
+        cmap=_tmap_base_cmap,
+        norm=mcolors.Normalize(vmin=0, vmax=_n_exploitation_iter - 1),
     )
     _tsm.set_array([])
-    fig_tmap_static.colorbar(_tsm, ax=ax_tmap, label="AL Iteration (EI)")
-    fig_tmap_static.savefig("results/tmap_selection.png", dpi=600, bbox_inches="tight")
+    fig_tmap_static.colorbar(_tsm, ax=ax_tmap, label="AL Iteration (Exploitation)")
+    fig_tmap_static.savefig("results/tmap_selection.svg", bbox_inches="tight")
     plt.close(fig_tmap_static)
 
     # ── Calibration ────────────────────────────────────────────────────────────────
     # Calibration is performed per-iteration inside run_active_learning.
-    # Visualize before/after using stored predictions from the final EI iteration.
-    final_state = all_runs["EI"][0]["history"][-1]
+    # Visualize before/after using stored predictions from the final Exploitation iteration.
+    final_state = all_runs["Exploitation"][0]["history"][-1]
 
     exp_pre, obs_pre = uct.metrics_calibration.get_proportion_lists_vectorized(
         final_state["y_test_pred_pre_cal"],
@@ -423,13 +427,13 @@ def main() -> None:
     # ── Batch PNG export (single kaleido process) ──────────────────────────────────
     print(f"\nExporting {len(_plotly_svgs)} Plotly figures to PNG...")
 
-    async def _export_pngs():
+    async def _export_svgs():
         async with Kaleido() as k:
-            for _fig, _png_path in _plotly_svgs:
-                await k.write_fig(_fig, _png_path)
-                print(f"  saved {_png_path}")
+            for _fig, _svg_path in _plotly_svgs:
+                await k.write_fig(_fig, _svg_path)
+                print(f"  saved {_svg_path}")
 
-    asyncio.run(_export_pngs())
+    asyncio.run(_export_svgs())
 
     print("\nAll visualizations saved to results/")
     # kaleido v1 leaves a non-daemon background thread that prevents a clean exit;
