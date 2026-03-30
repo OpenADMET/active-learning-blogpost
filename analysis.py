@@ -40,6 +40,7 @@ import pandas as pd  # noqa: E402
 import uncertainty_toolbox as uct  # noqa: E402
 from kaleido import Kaleido  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
+from scipy.stats import spearmanr  # noqa: E402
 
 import src.plots as alp  # noqa: E402
 from src.config import ALConfig  # noqa: E402
@@ -163,6 +164,10 @@ def main() -> None:
         for run in all_runs[strategy]:
             seed = run["seed"]
             for step in run["history"]:
+                _abs_err = np.abs(
+                    step["y_test_pred"] - df_test["pEC50"].values
+                )
+                _rho = spearmanr(step["y_test_std"], _abs_err).statistic
                 records.append(
                     {
                         "strategy": strategy,
@@ -175,6 +180,7 @@ def main() -> None:
                         "spearmanr": step["spearmanr"],
                         "miscal_area": step["miscal_area"],
                         "miscal_area_pre_cal": step["miscal_area_pre_cal"],
+                        "sigma_error_rho": float(_rho),
                     }
                 )
                 for pval in step["pool_y_values"]:
@@ -209,11 +215,13 @@ def main() -> None:
             miscal_area_std=("miscal_area", "std"),
             miscal_area_pre_cal_mean=("miscal_area_pre_cal", "mean"),
             miscal_area_pre_cal_std=("miscal_area_pre_cal", "std"),
+            sigma_error_rho_mean=("sigma_error_rho", "mean"),
+            sigma_error_rho_std=("sigma_error_rho", "std"),
         )
         .reset_index()
         .fillna(0)
     )
-    for metric in ["mae", "ktau", "r2", "miscal_area", "miscal_area_pre_cal"]:
+    for metric in ["mae", "ktau", "r2", "miscal_area", "miscal_area_pre_cal", "sigma_error_rho"]:
         learning_curve_summary[f"{metric}_lower"] = (
             learning_curve_summary[f"{metric}_mean"]
             - learning_curve_summary[f"{metric}_std"]
@@ -428,6 +436,16 @@ def main() -> None:
     )
     fig.write_html("results/calibration_area_per_iteration.html")
     _plotly_svgs.append((fig, "results/calibration_area_per_iteration.svg"))
+
+    # ── Sigma–error correlation ────────────────────────────────────────────────────
+    print("Generating sigma–error correlation plot...")
+    fig = alp.plot_sigma_error_correlation(
+        learning_curve_summary,
+        strategy_order=cfg.strategies,
+        color_map=STRATEGY_COLORS,
+    )
+    fig.write_html("results/sigma_error_correlation.html")
+    _plotly_svgs.append((fig, "results/sigma_error_correlation.svg"))
 
     # ── Batch PNG export (single kaleido process) ──────────────────────────────────
     print(f"\nExporting {len(_plotly_svgs)} Plotly figures to PNG...")

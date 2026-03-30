@@ -195,6 +195,16 @@ The flat trajectory also tells us that the committee's uncertainty structure is 
 
 The more informative diagnostic for active learning is whether σ *correlates* with actual prediction error — a ranking question that can be assessed with Spearman ρ between σ and |error|. Absolute coverage (the calibration curve area) is less meaningful when the calibration and evaluation distributions are separated by design.
 
+The correlations are positive but weak. **Exploitation** achieves the highest terminal ρ at roughly 0.19; all other strategies cluster around 0.13. Across the campaign, ρ improves by approximately 50% in relative terms — rising from around 0.10 at the start to 0.15 by the final iteration — but the absolute values remain low throughout. In practical terms, a Spearman ρ of 0.15–0.19 means σ is a faint ordinal signal at best: the model has *some* sense of where it is uncertain, but it cannot reliably rank which structurally novel test scaffolds will carry the largest errors.
+
+The modest gain in ρ over the campaign is consistent with the committee gradually learning the activity landscape of the pool. As more compounds are labeled, ensemble members disagree more systematically on the genuinely hard regions of chemical space, producing a σ that weakly tracks difficulty. The fact that **Exploitation** shows the highest ρ is mechanistically sensible: by concentrating its labels in the high-activity corner of chemical space, it leaves a larger fraction of the pool unexplored — and σ correctly identifies those uncharted regions as more error-prone relative to the labeled neighborhood. The remaining strategies spread their labels more broadly and therefore generate less directional disagreement on the test set.
+
+Taken together, the calibration-curve and ρ results tell the same story: the ensemble's uncertainty is useful for *acquisition* (it provides a consistent relative ranking of unlabeled pool molecules), but its absolute coverage on structurally distinct test scaffolds is not trustworthy, and its ability to rank test errors is limited. This is an inherent consequence of the scaffold split, not a correctable deficiency of the model.
+
+[![Spearman ρ(σ, |error|) per iteration — uncertainty–error correlation (click for interactive version)](results/sigma_error_correlation.svg)](results/sigma_error_correlation.html)
+
+*Figure 8. Spearman rank correlation between predicted uncertainty (σ) and absolute prediction error (|ŷ − y|) on the held-out test set, as a function of labeled pool size, for each acquisition strategy. A positive ρ indicates that σ correctly ranks which test compounds the model is most wrong about. Shaded bands show ±1 SD across five random seeds.*
+
 ## Takeaways
 
 1. **Foundation models and large batches flatten label-efficiency gaps**: Strategies converge to near-identical terminal accuracy — all within 0.03 MAE. Exploitation-heavy strategies pay a small accuracy penalty by concentrating labels in a narrow region; the rest reach 0.52 MAE and ~0.53 Kendall's τ. Two factors suppress the advantage of smarter acquisition: CheMeleon's pretraining means any reasonable labeled set produces a capable model, and a 100-compound batch per iteration is a coarse enough update that fine-grained selection strategy differences wash out.
