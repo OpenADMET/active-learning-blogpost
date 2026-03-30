@@ -40,6 +40,7 @@ import pandas as pd  # noqa: E402
 import uncertainty_toolbox as uct  # noqa: E402
 from kaleido import Kaleido  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
+from mpl_toolkits.axes_grid1 import make_axes_locatable  # noqa: E402
 from scipy.stats import spearmanr  # noqa: E402
 
 import src.plots as alp  # noqa: E402
@@ -321,7 +322,6 @@ def main() -> None:
         linewidths=0,
         zorder=2,
     )
-    ax_gtm.set_title(f"{_method} Compound Selection in GTM Chemical Space")
     ax_gtm.set_xlabel("GTM dimension 1")
     ax_gtm.set_ylabel("GTM dimension 2")
     ax_gtm.set_facecolor("white")
@@ -331,8 +331,10 @@ def main() -> None:
         cmap=_base_cmap, norm=mcolors.Normalize(vmin=0, vmax=_n_iter - 1)
     )
     _sm.set_array([])
+    _gtm_divider = make_axes_locatable(ax_gtm)
+    _gtm_cax = _gtm_divider.append_axes("right", size="5%", pad=0.1)
     fig_gtm_static.colorbar(
-        _sm, ax=ax_gtm, label="AL Iteration"
+        _sm, cax=_gtm_cax, label="AL Iteration"
     ).ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     fig_gtm_static.savefig(
         f"results/gtm_selection_animation_{_method.lower()}.svg",
@@ -389,7 +391,6 @@ def main() -> None:
             zorder=1,
         )
     ax_tmap.scatter(_tx, _ty, c=_tmap_point_colors, s=2, linewidths=0, zorder=2)
-    ax_tmap.set_title("Active Learning Selection (TMAP)")
     ax_tmap.axis("off")
     fig_tmap_static.patch.set_facecolor("white")
     ax_tmap.set_box_aspect(1)
@@ -398,8 +399,10 @@ def main() -> None:
         norm=mcolors.Normalize(vmin=0, vmax=_n_exploitation_iter - 1),
     )
     _tsm.set_array([])
+    _tmap_divider = make_axes_locatable(ax_tmap)
+    _tmap_cax = _tmap_divider.append_axes("right", size="5%", pad=0.1)
     fig_tmap_static.colorbar(
-        _tsm, ax=ax_tmap, label="AL Iteration (Exploitation)"
+        _tsm, cax=_tmap_cax, label="AL Iteration (Exploitation)"
     ).ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     fig_tmap_static.savefig("results/tmap_selection.svg", bbox_inches="tight")
     plt.close(fig_tmap_static)
