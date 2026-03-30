@@ -39,6 +39,7 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import uncertainty_toolbox as uct  # noqa: E402
 from kaleido import Kaleido  # noqa: E402
+from matplotlib.ticker import MaxNLocator  # noqa: E402
 
 import src.plots as alp  # noqa: E402
 from src.config import ALConfig  # noqa: E402
@@ -322,7 +323,9 @@ def main() -> None:
         cmap=_base_cmap, norm=mcolors.Normalize(vmin=0, vmax=_n_iter - 1)
     )
     _sm.set_array([])
-    fig_gtm_static.colorbar(_sm, ax=ax_gtm, label="AL Iteration")
+    fig_gtm_static.colorbar(
+        _sm, ax=ax_gtm, label="AL Iteration"
+    ).ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     fig_gtm_static.savefig(
         f"results/gtm_selection_animation_{_method.lower()}.svg",
         dpi=150,
@@ -367,7 +370,7 @@ def main() -> None:
         for i in range(_n_exploitation_iter)
     ]
     _tmap_point_colors = [_tmap_colors[ci] for ci in _ct]
-    fig_tmap_static, ax_tmap = plt.subplots(figsize=(4, 4))
+    fig_tmap_static, ax_tmap = plt.subplots(figsize=(8.5, 8.5))
     for _si, _ti in zip(_ts, _tt):
         ax_tmap.plot(
             [_tx[_si], _tx[_ti]],
@@ -387,7 +390,9 @@ def main() -> None:
         norm=mcolors.Normalize(vmin=0, vmax=_n_exploitation_iter - 1),
     )
     _tsm.set_array([])
-    fig_tmap_static.colorbar(_tsm, ax=ax_tmap, label="AL Iteration (Exploitation)")
+    fig_tmap_static.colorbar(
+        _tsm, ax=ax_tmap, label="AL Iteration (Exploitation)"
+    ).ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     fig_tmap_static.savefig("results/tmap_selection.svg", bbox_inches="tight")
     plt.close(fig_tmap_static)
 
