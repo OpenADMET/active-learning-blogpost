@@ -18,10 +18,21 @@ import pickle
 import re
 from pathlib import Path
 
-from src.helpers import SEEDS, STRATEGIES
+from src.helpers import STRATEGIES
 
 
 def main() -> None:
+    """Merge per-job pickle files from distributed HPC runs into a single checkpoint.
+
+    Scans ``results/`` for all ``run_<strategy>_seed<N>.pkl`` files produced by
+    individual ``python run.py --strategy S --seed N`` jobs, prints a coverage
+    report showing which (strategy, seed) pairs are present vs. missing, and
+    writes a merged ``results/all_runs.pkl`` containing all results alongside the
+    original setup data.
+
+    Missing pairs are omitted from the merged output rather than raising an error,
+    so partial results can still be passed to ``analysis.py``.
+    """
     setup_path = Path("results/setup.pkl")
     if not setup_path.exists():
         raise FileNotFoundError(
@@ -31,8 +42,10 @@ def main() -> None:
     with open(setup_path, "rb") as fh:
         setup = pickle.load(fh)
     print(f"Loaded setup from {setup_path}.")
+    seeds: list[int] = setup["config"].seeds
 
     # ── Discover per-job pickles ───────────────────────────────────────────────
+    # Discover all completed per-job pickle files matching the expected naming convention
     pattern = re.compile(r"^run_(.+)_seed(\d+)\.pkl$")
     job_results: dict[tuple[str, int], dict] = {}
 
@@ -50,10 +63,10 @@ def main() -> None:
     print("\nCoverage summary:")
     all_present = True
     for strategy in STRATEGIES:
-        found = [s for s in SEEDS if (strategy, s) in job_results]
-        missing = [s for s in SEEDS if (strategy, s) not in job_results]
+        found = [s for s in seeds if (strategy, s) in job_results]
+        missing = [s for s in seeds if (strategy, s) not in job_results]
         suffix = f"  [MISSING seeds: {missing}]" if missing else ""
-        print(f"  {strategy}: {len(found)}/{len(SEEDS)} seeds{suffix}")
+        print(f"  {strategy}: {len(found)}/{len(seeds)} seeds{suffix}")
         if missing:
             all_present = False
 
@@ -64,11 +77,12 @@ def main() -> None:
         )
 
     # ── Build all_runs ─────────────────────────────────────────────────────────
+    # Only include (strategy, seed) pairs that were successfully loaded above
     all_runs: dict[str, list] = {}
     for strategy in STRATEGIES:
         runs = [
             {"seed": seed, **job_results[(strategy, seed)]}
-            for seed in SEEDS
+            for seed in seeds
             if (strategy, seed) in job_results
         ]
         if runs:

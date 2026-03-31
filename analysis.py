@@ -11,7 +11,7 @@ Usage
 
 Generated outputs (written to ``results/``)::
     learning_curve_mae.html / .svg            — MAE learning curves per strategy
-    learning_curve_ktau.html / .svg           — Kendall’s τ learning curves per strategy
+    learning_curve_ktau.html / .svg           — Kendall tau learning curves per strategy
     hit_discovery_curve.html / .svg           — cumulative hits vs. labeled-pool size
     gtm_selection_animation_exploitation.html / .svg — animated GTM (Exploitation)
     tmap_selection.html / .svg                — interactive TMAP (Exploitation, via Faerun)
@@ -54,6 +54,14 @@ warnings.filterwarnings("ignore")
 
 
 def main() -> None:
+    """Load AL results, run sanity checks, assemble DataFrames, and write all figures.
+
+    Reads ``results/setup.pkl`` for the shared experimental setup and all
+    ``results/run_*.pkl`` files produced by ``run.py``. Performs three sanity
+    checks (strategy coverage, seed-count consistency, iteration-count consistency),
+    assembles a tidy long-format DataFrame, aggregates per-strategy statistics,
+    and writes every figure referenced in ``blogpost.md`` to ``results/``.
+    """
     # ── Load setup ─────────────────────────────────────────────────────────────
     setup_path = Path("results/setup.pkl")
     if not setup_path.exists():
@@ -156,6 +164,8 @@ def main() -> None:
     print(f"\nStrategies loaded: {list(all_runs.keys())}")
 
     # ── Unpack into tidy DataFrames ───────────────────────────────────────────────
+    # Each history step is flattened into one row; pool_history records track
+    # which pEC50 values were in the labeled pool at each iteration for the hit-discovery curve
     records = []
     pool_history_records = []
 
@@ -201,8 +211,8 @@ def main() -> None:
         f"Pool history rows: {len(pool_history_long)}"
     )
 
-    # Aggregate across seeds — mean ± std per (strategy, n_labeled).
-    # When only one seed is present std=NaN → filled to 0 (no band).
+    # Aggregate across seeds — mean ± std per (strategy, n_labeled)
+    # When only one seed is present std=NaN → filled to 0 (no band)
     learning_curve_summary = (
         learning_curve_long.groupby(["strategy", "n_labeled"])
         .agg(
@@ -222,6 +232,7 @@ def main() -> None:
         .reset_index()
         .fillna(0)
     )
+    # Compute ±1σ confidence interval columns for each metric
     for metric in ["mae", "ktau", "r2", "miscal_area", "miscal_area_pre_cal", "sigma_error_rho"]:
         learning_curve_summary[f"{metric}_lower"] = (
             learning_curve_summary[f"{metric}_mean"]
@@ -235,7 +246,7 @@ def main() -> None:
     Path("results").mkdir(exist_ok=True)
 
     # Accumulate (fig, svg_path) pairs; all SVG writes are batched at the end in a
-    # single Kaleido() session to avoid spawning a new subprocess per figure.
+    # single Kaleido() session to avoid spawning a new subprocess per figure
     _plotly_svgs: list[tuple] = []
 
     # ── Learning curves ────────────────────────────────────────────────────────────
@@ -286,8 +297,8 @@ def main() -> None:
     )
     fig.update_layout(autosize=False, width=800, height=800)
     fig.write_html(f"results/gtm_selection_animation_{_method.lower()}.html")
-    # GTM animation is animated; PNG would only capture an empty first frame.
-    # A dedicated matplotlib static snapshot is generated below instead.
+    # GTM animation is animated; PNG would only capture an empty first frame
+    # A dedicated matplotlib static snapshot is generated below instead
 
     # Static snapshot: final-state scatter colored by iteration
     print(f"Generating static GTM snapshot ({_method})...")
@@ -408,8 +419,8 @@ def main() -> None:
     plt.close(fig_tmap_static)
 
     # ── Calibration ────────────────────────────────────────────────────────────────
-    # Calibration is performed per-iteration inside run_active_learning.
-    # Visualize before/after using stored predictions from the final Exploitation iteration.
+    # Calibration is performed per-iteration inside run_active_learning
+    # Visualize before/after using stored predictions from the final Exploitation iteration
     final_state = all_runs["Exploitation"][0]["history"][-1]
 
     exp_pre, obs_pre = uct.metrics_calibration.get_proportion_lists_vectorized(
@@ -453,6 +464,7 @@ def main() -> None:
     # ── Batch PNG export (single kaleido process) ──────────────────────────────────
     print(f"\nExporting {len(_plotly_svgs)} Plotly figures to PNG...")
 
+    # Export all Plotly figures in a single Kaleido subprocess session for efficiency
     async def _export_svgs():
         async with Kaleido() as k:
             for _fig, _svg_path in _plotly_svgs:
@@ -463,7 +475,7 @@ def main() -> None:
 
     print("\nAll visualizations saved to results/")
     # kaleido v1 leaves a non-daemon background thread that prevents a clean exit;
-    # os._exit(0) terminates immediately after all writes complete.
+    # os._exit(0) terminates immediately after all writes complete
     os._exit(0)
 
 
