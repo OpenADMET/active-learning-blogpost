@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Active learning pipeline entry point.
+r"""Active learning pipeline entry point.
 
 Loads the PXR dataset, performs a scaffold split, fits the GTM embedding for
 visualization, then runs the active learning loop for the requested strategies
@@ -70,7 +70,25 @@ SETUP_PKL = Path("results/setup.pkl")
 
 
 def run_setup(cfg: ALConfig) -> dict:
-    """Load data, scaffold-split, fit GTM, and optionally load external seed data."""
+    """Load data, scaffold-split, fit GTM embedding, and optionally load seed data.
+
+    Reads the dataset from the path specified in ``cfg``, performs an 80/20
+    scaffold split into pool and test sets, fits a GTM on the pool for
+    visualization, and (optionally) loads an external seed training dataset
+    while deduplicating it against pool and test compounds to prevent leakage.
+
+    Parameters
+    ----------
+    cfg : ALConfig
+        Validated experiment configuration loaded via ``load_config()``.
+
+    Returns
+    -------
+    dict
+        Setup checkpoint with keys: ``"df_pool"``, ``"df_test"``, ``"df_seed"``
+        (``None`` if no seed data), ``"gtm_coords_pool"``, and ``"config"``.
+
+    """
     _ds_path = Path(cfg.dataset_path).expanduser()
     df = (
         pd.read_csv(_ds_path)
@@ -92,7 +110,7 @@ def run_setup(cfg: ALConfig) -> dict:
     plt.close(fig)
 
     # Scaffold split: 80% pool, 20% test. Per-iteration calibration is handled
-    # inside run_active_learning by holding out 10% of the current training set.
+    # inside run_active_learning by holding out 10% of the current training set
     splitter = ScaffoldSplitter(
         train_size=0.8, val_size=0.0, test_size=0.2, random_state=42
     )
@@ -153,7 +171,24 @@ def run_setup(cfg: ALConfig) -> dict:
 
 
 def load_or_run_setup(config_path: str = "config.yaml") -> dict:
-    """Load results/setup.pkl if it exists, otherwise compute and save it."""
+    """Load the shared setup checkpoint, computing and saving it if absent.
+
+    If ``results/setup.pkl`` exists it is loaded and returned directly, allowing
+    HPC worker jobs to skip the expensive setup phase. Otherwise ``run_setup``
+    is called and the result is pickled to ``results/setup.pkl``.
+
+    Parameters
+    ----------
+    config_path : str, optional
+        Path to the YAML config file, passed to ``load_config()`` when setup
+        must be computed. Default is ``"config.yaml"``.
+
+    Returns
+    -------
+    dict
+        Setup checkpoint — same structure as the return value of ``run_setup()``.
+
+    """
     if SETUP_PKL.exists():
         print(f"Loading shared setup from {SETUP_PKL}...")
         with open(SETUP_PKL, "rb") as fh:
@@ -171,7 +206,23 @@ def load_or_run_setup(config_path: str = "config.yaml") -> dict:
 
 
 def run_job(strategy: str, seed: int, setup: dict) -> None:
-    """Run one (strategy, seed) pair and save results/run_<strategy>_seed<seed>.pkl."""
+    """Run one (strategy, seed) pair and write its result to disk.
+
+    Skips the job silently if the output file already exists, making it safe
+    to dispatch the same job multiple times (idempotent). On success, writes
+    ``results/run_<strategy>_seed<seed>.pkl`` containing the strategy name,
+    seed, initial labeled-pool size, and the full AL result dict.
+
+    Parameters
+    ----------
+    strategy : str
+        Acquisition strategy name (must be present in ``cfg.strategies``).
+    seed : int
+        Outer random seed for this run (must be present in ``cfg.seeds``).
+    setup : dict
+        Shared setup checkpoint as returned by ``load_or_run_setup()``.
+
+    """
     cfg: ALConfig = setup["config"]
     out_path = Path(f"results/run_{strategy}_seed{seed}.pkl")
     if out_path.exists():
@@ -215,6 +266,19 @@ def run_job(strategy: str, seed: int, setup: dict) -> None:
 
 
 def main() -> None:
+    """Parse CLI arguments and dispatch active learning jobs.
+
+    Supports three operating modes based on the flags provided:
+
+    - ``--setup-only``: run data loading, scaffold split, and GTM embedding;
+      save ``results/setup.pkl`` and exit. Use this once before submitting HPC jobs.
+    - Single job: ``--strategy S --seed N`` runs exactly one (strategy, seed) pair.
+    - Batch: omit ``--strategy`` and/or ``--seed`` to run all configured combinations.
+
+    All experiment parameters are read from the YAML config file (default:
+    ``config.yaml``) during setup and then frozen into ``setup.pkl``; worker jobs
+    always use the config stored in the checkpoint.
+    """
     parser = argparse.ArgumentParser(
         description="Active learning pipeline for PXR pEC50 prediction."
     )

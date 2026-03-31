@@ -1,3 +1,10 @@
+"""Plotly and Faerun visualization functions for the active learning pipeline.
+
+Each function returns a configured figure object ready to display or export.
+Figures share a consistent visual style: white background, black axes, and
+per-strategy colors from ``src.helpers.STRATEGY_COLORS``.
+"""
+
 import matplotlib.cm as mcm
 import matplotlib.colors as mcolors
 import numpy as np
@@ -15,8 +22,7 @@ def plot_learning_curve_with_bands(
     width: int = 700,
     height: int = 450,
 ) -> go.Figure:
-    """
-    Interactive line plot with shaded ±1σ band per strategy.
+    """Interactive line plot with shaded ±1σ band per strategy.
 
     Parameters
     ----------
@@ -38,6 +44,8 @@ def plot_learning_curve_with_bands(
     Returns
     -------
     go.Figure
+        Interactive Plotly figure with one mean line and one shaded ±1σ band per strategy.
+
     """
     fig = go.Figure()
 
@@ -116,9 +124,9 @@ def plot_hit_discovery_curve(
     width: int = 700,
     height: int = 450,
 ) -> go.Figure:
-    """
-    Interactive line plot of cumulative hits found vs. number of labeled molecules,
-    with mean ± 1σ bands per strategy and a dashed reference line at the absolute
+    """Interactive line plot of cumulative hits found vs. number of labeled molecules.
+
+    Shows mean ± 1σ bands per strategy and a dashed reference line at the absolute
     hit ceiling.
 
     Parameters
@@ -147,8 +155,11 @@ def plot_hit_discovery_curve(
     Returns
     -------
     go.Figure
+        Interactive Plotly figure showing cumulative hits vs. labeled pool size, with
+        a dashed reference line at the total hit ceiling.
+
     """
-    # Count hits per (strategy, seed, iteration), then map to n_labeled.
+    # Count hits per (strategy, seed, iteration), then map to n_labeled
     hits_per_seed_iter = (
         pool_history_df.groupby(["strategy", "seed", "iteration"])[value_col]
         .apply(lambda s: (s >= hit_threshold).sum())
@@ -161,8 +172,8 @@ def plot_hit_discovery_curve(
         n_labeled, on=["strategy", "seed", "iteration"], how="left"
     )
 
-    # Aggregate across seeds: mean ± std per (strategy, n_labeled).
-    # std is NaN when only one seed is present; fill to 0 so bands collapse gracefully.
+    # Aggregate across seeds: mean ± std per (strategy, n_labeled)
+    # std is NaN when only one seed is present; fill to 0 so bands collapse gracefully
     hits_summary = (
         hits_df.groupby(["strategy", "n_labeled"])["n_hits"]
         .agg(n_hits_mean="mean", n_hits_std="std")
@@ -258,8 +269,8 @@ def plot_calibration_curve_before_after(
     width: int = 520,
     height: int = 520,
 ) -> go.Figure:
-    """
-    Interactive plot of diagonal (perfect calibration) and two calibration curves.
+    """Interactive plot of diagonal (perfect calibration) and two calibration curves.
+
     Fills the area between each curve and the diagonal to show miscalibration.
 
     Parameters
@@ -276,6 +287,10 @@ def plot_calibration_curve_before_after(
     Returns
     -------
     go.Figure
+        Interactive Plotly figure with the perfect-calibration diagonal and two
+        calibration curves (before and after isotonic regression), with filled
+        miscalibration areas.
+
     """
     fig = go.Figure()
 
@@ -290,7 +305,7 @@ def plot_calibration_curve_before_after(
         )
     )
 
-    # --- Before calibration ---
+    # Before calibration
     # Diagonal reference (invisible) used as fill anchor
     fig.add_trace(
         go.Scatter(
@@ -314,7 +329,7 @@ def plot_calibration_curve_before_after(
         )
     )
 
-    # --- After calibration ---
+    # After calibration
     # Diagonal reference (invisible) used as fill anchor
     fig.add_trace(
         go.Scatter(
@@ -376,8 +391,7 @@ def plot_gtm_selection_animation(
     title: str = "Active Learning Selection (GTM)",
     background_gtm_coords: np.ndarray | None = None,
 ) -> go.Figure:
-    """
-    Animated Plotly scatter of compound selections on a pre-computed GTM embedding.
+    """Animated Plotly scatter of compound selections on a pre-computed GTM embedding.
 
     Renders one frame per active learning iteration with three layers:
     gray background (full pool), blue accumulation (all prior selections),
@@ -405,8 +419,9 @@ def plot_gtm_selection_animation(
     Returns
     -------
     go.Figure
-        Plotly figure with animation frames, a play/pause button, and an
-        iteration slider. Call ``fig.show()`` to render in a Jupyter Notebook.
+        Animated Plotly figure with per-iteration frames, a play/pause button, and
+        an iteration slider. Call ``fig.show()`` to display inline in a Jupyter Notebook.
+
     """
     gtm_coords = np.asarray(gtm_coords)
     if background_gtm_coords is not None:
@@ -604,8 +619,7 @@ def plot_tmap_faerun(
     n_background: int = 0,
     background_point_scale: float = 1.0,
 ) -> Faerun:
-    """
-    Faerun scatter plot of compound selections on a pre-computed TMAP layout.
+    """Faerun scatter plot of compound selections on a pre-computed TMAP layout.
 
     Each compound node is colored by the active learning iteration in which it
     was first selected, using faerun's native categorical colormapping. Compounds
@@ -662,6 +676,7 @@ def plot_tmap_faerun(
         Configured faerun instance. Call ``f.plot(output_name, output_path)``
         to regenerate the HTML, or ``f.plot(output_name, output_path,
         notebook_height=500)`` to display inline in a Jupyter Notebook.
+
     """
     x, y, s, t = tmap_layout
 
@@ -690,7 +705,7 @@ def plot_tmap_faerun(
     # Build a ListedColormap: gray for "Unselected" (index 0), then N viridis
     # colors sampled across the full colormap range for each iteration category.
     # Using a ListedColormap avoids the matplotlib integer-indexing issue where
-    # small integers (0, 1, 2…) all land at the dark end of continuous colormaps.
+    # small integers (0, 1, 2…) all land at the dark end of continuous colormaps
     n_iter = len(iterations)
     base_cmap = mcm.get_cmap(colormap) if isinstance(colormap, str) else colormap
     iter_colors = [base_cmap(i / max(n_iter - 1, 1)) for i in range(n_iter)]
@@ -742,13 +757,12 @@ def plot_calibration_area_per_iteration(
     width: int = 700,
     height: int = 450,
 ) -> go.Figure:
-    """
-    Line plot of miscalibration area per iteration for each strategy,
-    showing before- and after-calibration on the same panel.
+    """Line plot of miscalibration area per iteration for each strategy.
 
-    Solid lines represent post-calibration area; dashed lines represent
-    pre-calibration (raw ensemble) area. Both are shown with ±1σ bands
-    aggregated across seeds. Lower values indicate better calibration.
+    Shows both before- and after-calibration values on the same panel. Solid lines
+    represent post-calibration area; dashed lines represent pre-calibration (raw
+    ensemble) area. Both are shown with ±1σ bands aggregated across seeds.
+    Lower values indicate better calibration.
 
     Parameters
     ----------
@@ -767,6 +781,9 @@ def plot_calibration_area_per_iteration(
     Returns
     -------
     go.Figure
+        Interactive Plotly figure with solid post-calibration lines, dashed
+        pre-calibration lines, and ±1σ bands per strategy.
+
     """
     fig = go.Figure()
 
@@ -868,6 +885,9 @@ def plot_sigma_error_correlation(
     Returns
     -------
     go.Figure
+        Interactive Plotly figure with Spearman ρ(σ, |error|) vs. labeled pool
+        size, with ±1σ bands and a dashed y = 0 reference line.
+
     """
     fig = go.Figure()
 
@@ -959,6 +979,7 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     -------
     str
         CSS ``rgba()`` string, e.g. ``"rgba(170,187,204,0.5)"``.
+
     """
     hex_color = hex_color.lstrip("#")
     if len(hex_color) == 3:

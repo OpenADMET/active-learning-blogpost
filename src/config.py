@@ -11,8 +11,8 @@ from pathlib import Path
 
 import yaml
 
-# Valid strategy universe — kept in sync with STRATEGIES in src/helpers.py.
-# Defined here directly to avoid any circular-import risk.
+# Valid strategy universe — kept in sync with STRATEGIES in src/helpers.py
+# Defined here directly to avoid any circular-import risk
 _VALID_STRATEGIES = ["EI", "UCB", "Random", "Exploitation", "Exploration", "Diversity"]
 
 
@@ -53,6 +53,7 @@ class ALConfig:
         Committee size — number of bootstrapped ensemble members (> 0).
     max_epochs : int
         Maximum training epochs per committee member (> 0).
+
     """
 
     dataset_path: str
@@ -90,6 +91,7 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
     ValueError
         If any required field is missing, has the wrong type, or fails a range
         check. All validation errors are collected and reported together.
+
     """
     path = Path(path)
     if not path.exists():
@@ -104,6 +106,9 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
 
     errors: list[str] = []
 
+    # Helper that validates a config field as a strictly positive integer
+    # and appends a human-readable error message if the check fails.
+    # All errors are collected before raising so the user sees every problem at once.
     def _require_pos_int(section_dict: dict, key: str, section: str) -> int | None:
         val = section_dict.get(key)
         if val is None:
@@ -197,7 +202,7 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
             "Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    # At this point all values are validated; assert to satisfy static analysis.
+    # At this point all values are validated; assert to satisfy static analysis
     assert k_iter is not None
     assert query_size is not None
     assert n_start is not None
