@@ -22,6 +22,12 @@ active_learning:
     - Exploration
     - Diversity
 
+  # Split types to run. Valid options: scaffold, random
+  # Each produces a separate setup_<split_type>.pkl and run_<split_type>_*.pkl set.
+  split_types:
+    - scaffold
+    - random
+
   # Outer seeds used to generate error bands on learning curves.
   # Each (strategy, seed) pair becomes one HPC job.
   seeds: [42, 43, 44, 45, 46]

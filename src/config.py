@@ -15,6 +15,9 @@ import yaml
 # Defined here directly to avoid any circular-import risk
 _VALID_STRATEGIES = ["EI", "UCB", "Random", "Exploitation", "Exploration", "Diversity"]
 
+# Valid split-type options
+_VALID_SPLIT_TYPES = ["scaffold", "random"]
+
 
 @dataclass
 class ALConfig:
@@ -39,6 +42,11 @@ class ALConfig:
     strategies : list[str]
         Acquisition strategies to run. Must be a non-empty subset of
         ``["EI", "UCB", "Random", "Exploitation", "Exploration", "Diversity"]``.
+    split_types : list[str]
+        Dataset split methods to run. Must be a non-empty subset of
+        ``["scaffold", "random"]``. Each split type produces its own
+        ``setup_<split_type>.pkl`` and set of run pickles, enabling side-by-side
+        OOD vs. IID comparisons in ``analysis.py``.
     seeds : list[int]
         Outer random seeds that define independent AL runs for error bands.
         Each ``(strategy, seed)`` pair becomes one HPC job.
@@ -63,6 +71,7 @@ class ALConfig:
     seed_smiles_col: str
     seed_activity_col: str
     strategies: list[str]
+    split_types: list[str]
     seeds: list[int]
     k_iter: int
     query_size: int
@@ -170,6 +179,19 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
                 f"Valid options: {_VALID_STRATEGIES}"
             )
 
+    # split_types
+    split_types = al.get("split_types")
+    if not split_types or not isinstance(split_types, list):
+        errors.append("[active_learning] 'split_types' must be a non-empty list")
+        split_types = []
+    else:
+        invalid_st = [s for s in split_types if s not in _VALID_SPLIT_TYPES]
+        if invalid_st:
+            errors.append(
+                f"[active_learning] unrecognised split_types: {invalid_st}. "
+                f"Valid options: {_VALID_SPLIT_TYPES}"
+            )
+
     # seeds
     seeds = al.get("seeds")
     if (
@@ -217,6 +239,7 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         seed_smiles_col=seed_smiles_col,
         seed_activity_col=seed_activity_col,
         strategies=strategies,
+        split_types=split_types,
         seeds=seeds,
         k_iter=k_iter,
         query_size=query_size,
