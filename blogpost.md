@@ -96,13 +96,13 @@ Run `python analysis.py` to generate all figures. They are written to `results/`
 
 The strategies converge to comparable terminal performance. On MAE, **Exploitation** reaches 0.64, **UCB** 0.59, and the remaining four strategies (**EI**, **Random**, **Exploration**, and **Diversity**) all land at 0.56. The modest accuracy penalty for exploitation-heavy strategies likely reflects their tendency to concentrate labels in a narrow region of chemical space.
 
-[![Learning curves — MAE (click for interactive version)](results/learning_curve_mae.svg)](results/learning_curve_mae.html)
+[![Learning curves — MAE (click for interactive version)](plots/learning_curve_mae.svg)](plots/learning_curve_mae.html)
 
 *Figure 1. Mean absolute error (MAE, pEC50 units) on the held-out scaffold-split test set as a function of labeled pool size, for each of the six acquisition strategies. Shaded bands show ±1 SD across five random seeds.*
 
 On Kendall's τ all methods are all at approximately ~0.57, meaning the rank-ordering of predictions is about equal regardless of how compounds were selected.
 
-[![Learning curves — Kendall's τ (click for interactive version)](results/learning_curve_ktau.svg)](results/learning_curve_ktau.html)
+[![Learning curves — Kendall's τ (click for interactive version)](plots/learning_curve_ktau.svg)](plots/learning_curve_ktau.html)
 
 *Figure 2. Kendall's τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
 
@@ -110,7 +110,7 @@ On Kendall's τ all methods are all at approximately ~0.57, meaning the rank-ord
 
 One area where the strategies *do* diverge is in hit-finding. **Exploitation** and **UCB** recover all but one of the actives in the pool, converging on the potent region of chemical space efficiently. **EI**, **Random**, and **Diversity** recover a slightly smaller fraction, with **EI** offering no clear advantage over random at this scale. **Exploration** finds the fewest actives. By querying only by uncertainty, it maps model uncertainty rather than compound potency, spending queries on uninformative regions.
 
-[![Hit discovery curve (click for interactive version)](results/hit_discovery_curve.svg)](results/hit_discovery_curve.html)
+[![Hit discovery curve (click for interactive version)](plots/hit_discovery_curve.svg)](plots/hit_discovery_curve.html)
 
 *Figure 3. Cumulative number of active compounds (pEC50 ≥ 6.3) recovered as a function of labeled pool size for each acquisition strategy. Exploitation- and UCB-based strategies recover the most actives, reflecting their shared bias toward high predicted activity.*
 
@@ -126,7 +126,7 @@ We reuse the GTM embedding (fit before the active learning loop) for visualizati
 
 Use the slider to step through iterations manually, or press **▶ Play** to watch the campaign unfold. In the static version below, points are colored by iteration, as indicated by the color bar.
 
-[![Exploitation compound selection in GTM chemical space — final state colored by iteration (click for interactive animation)](results/gtm_selection_animation_exploitation.svg)](results/gtm_selection_animation_exploitation.html)
+[![Exploitation compound selection in GTM chemical space — final state colored by iteration (click for interactive animation)](plots/gtm_selection_animation_exploitation.svg)](plots/gtm_selection_animation_exploitation.html)
 
 *Figure 4. Final-state GTM embedding of the compound pool for the Exploitation strategy. Each point is a compound projected onto the 2D GTM manifold; color indicates the AL iteration in which it was first selected (viridis scale, earlier iterations darker). Gray points were never selected. Click to open the interactive animation with a per-iteration slider.*
 
@@ -134,7 +134,7 @@ The GTM gives a global view on a smooth 2D lattice. A complementary perspective 
 
 This makes TMAP useful for a question the GTM cannot answer: *does the strategy stay within one branch, or spread across the tree?* A strategy concentrated in one cluster may find actives quickly but leave entire branches unexplored, while one that fans outward covers more scaffolds at the cost of spending queries on uninformative regions. In the figure below, each point is colored by the first AL iteration it was selected (viridis scale, with unselected compounds in light gray). Hover over any point in the interactive version to inspect its SMILES.
 
-[![Active learning selection in TMAP chemical space, Exploitation strategy (click for interactive version)](results/tmap_selection.svg)](results/tmap_selection.html)
+[![Active learning selection in TMAP chemical space, Exploitation strategy (click for interactive version)](plots/tmap_selection.svg)](plots/tmap_selection.html)
 
 *Figure 5. TMAP layout of the compound pool for the Exploitation strategy, with the minimum-spanning-tree overlay drawn in gray. Point color encodes the first AL iteration in which each compound was selected (viridis scale); unselected compounds are shown in light gray. Click for the interactive Faerun version with SMILES tooltips.*
 
@@ -144,11 +144,11 @@ A model with good MAE can still be overconfident. In active learning this is dan
 
 We evaluate calibration using the **miscalibration area**, the integrated deviation from perfect coverage (e.g., 90% of observations within the 90% confidence interval).
 
-[![Uncertainty calibration curve before and after scaling-factor calibration (click for interactive version)](results/calibration_curve.svg)](results/calibration_curve.html)
+[![Uncertainty calibration curve before and after scaling-factor calibration (click for interactive version)](plots/calibration_curve.svg)](plots/calibration_curve.html)
 
 *Figure 6. Expected vs. observed coverage curves (calibration plots) before (uncalibrated) and after (calibrated) applying isotonic-regression scaling-factor calibration, evaluated on the scaffold-split test set at the final AL iteration of the Exploitation run. A perfectly calibrated model follows the diagonal.*
 
-[![Miscalibration area per iteration — before and after calibration (click for interactive version)](results/calibration_area_per_iteration.svg)](results/calibration_area_per_iteration.html)
+[![Miscalibration area per iteration — before and after calibration (click for interactive version)](plots/calibration_area_per_iteration.svg)](plots/calibration_area_per_iteration.html)
 
 *Figure 7. Miscalibration area (integrated deviation from perfect calibration) as a function of AL iteration for all six acquisition strategies, shown before and after scaling-factor calibration. Lower values indicate better-calibrated uncertainty estimates.*
 
@@ -158,7 +158,7 @@ The flat trajectory also confirms that the committee's uncertainty structure is 
 
 A more informative diagnostic is whether σ *correlates* with actual prediction error, assessed via Spearman ρ between σ and |error|. Absolute coverage is less meaningful when calibration and evaluation distributions are separated by design.
 
-[![Spearman ρ(σ, |error|) per iteration — uncertainty–error correlation (click for interactive version)](results/sigma_error_correlation.svg)](results/sigma_error_correlation.html)
+[![Spearman ρ(σ, |error|) per iteration — uncertainty–error correlation (click for interactive version)](plots/sigma_error_correlation.svg)](plots/sigma_error_correlation.html)
 
 *Figure 8. Spearman rank correlation between predicted uncertainty (σ) and absolute prediction error (|ŷ − y|) on the held-out test set, as a function of labeled pool size, for each acquisition strategy. A positive ρ indicates that σ correctly ranks which test compounds the model is most wrong about. Shaded bands show ±1 SD across five random seeds.*
 
