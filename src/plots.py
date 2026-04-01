@@ -1,3 +1,10 @@
+"""Plotly and Faerun visualization functions for the active learning pipeline.
+
+Each function returns a configured figure object ready to display or export.
+Figures share a consistent visual style: white background, black axes, and
+per-strategy colors from ``src.helpers.STRATEGY_COLORS``.
+"""
+
 import matplotlib.cm as mcm
 import matplotlib.colors as mcolors
 import numpy as np
@@ -15,8 +22,7 @@ def plot_learning_curve_with_bands(
     width: int = 700,
     height: int = 450,
 ) -> go.Figure:
-    """
-    Interactive line plot with shaded ±1σ band per strategy.
+    """Interactive line plot with shaded ±1σ band per strategy.
 
     Parameters
     ----------
@@ -38,6 +44,8 @@ def plot_learning_curve_with_bands(
     Returns
     -------
     go.Figure
+        Interactive Plotly figure with one mean line and one shaded ±1σ band per strategy.
+
     """
     fig = go.Figure()
 
@@ -57,6 +65,7 @@ def plot_learning_curve_with_bands(
                 y=df_sub[f"{metric_col}_upper"],
                 mode="lines",
                 line=dict(width=0),
+                legendgroup=strategy,
                 showlegend=False,
                 hoverinfo="skip",
                 **({"line_color": color} if color else {}),
@@ -73,6 +82,7 @@ def plot_learning_curve_with_bands(
                 fillcolor=(
                     _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
                 ),
+                legendgroup=strategy,
                 showlegend=False,
                 hoverinfo="skip",
             )
@@ -84,6 +94,7 @@ def plot_learning_curve_with_bands(
                 y=df_sub[f"{metric_col}_mean"],
                 mode="lines",
                 name=strategy,
+                legendgroup=strategy,
                 line=dict(width=2, color=color),
             )
         )
@@ -92,9 +103,10 @@ def plot_learning_curve_with_bands(
         xaxis_title="Number of Labeled Molecules",
         yaxis_title=ylabel,
         legend_title="Strategy",
-        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
-        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
+        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         plot_bgcolor="white",
+        margin=dict(t=20),
         width=width,
         height=height,
     )
@@ -105,26 +117,32 @@ def plot_hit_discovery_curve(
     pool_history_df: pd.DataFrame,
     learning_curve_df: pd.DataFrame,
     hit_threshold: float,
+    max_hits: int,
     strategy_order: list[str],
     color_map: dict | None = None,
     value_col: str = "pEC50",
     width: int = 700,
     height: int = 450,
 ) -> go.Figure:
-    """
-    Interactive line plot of cumulative hits found vs. number of labeled molecules,
-    with one line per strategy and a dashed reference line at the max hits found.
+    """Interactive line plot of cumulative hits found vs. number of labeled molecules.
+
+    Shows mean ± 1σ bands per strategy and a dashed reference line at the absolute
+    hit ceiling.
 
     Parameters
     ----------
     pool_history_df : pd.DataFrame
-        Must have columns: strategy, iteration, {value_col}. One row per compound
-        in the labeled pool at each iteration.
+        Must have columns: strategy, seed, iteration, {value_col}. One row per
+        compound in the labeled pool at each (seed, iteration).
     learning_curve_df : pd.DataFrame
-        Must have columns: strategy, iteration, n_labeled. Used to map iteration to
-        labeled-pool size for the x-axis.
+        Must have columns: strategy, seed, iteration, n_labeled. Used to map
+        (strategy, seed, iteration) to labeled-pool size for the x-axis.
     hit_threshold : float
         Minimum value_col value for a compound to be counted as a hit.
+    max_hits : int
+        Total number of hits in the full compound pool — an absolute upper bound
+        independent of strategy or seed. Used as the dashed reference line and as
+        the ceiling for the upper error band.
     strategy_order : list[str]
         Strategies to plot, controls legend order.
     color_map : dict or None, optional
@@ -137,38 +155,85 @@ def plot_hit_discovery_curve(
     Returns
     -------
     go.Figure
+        Interactive Plotly figure showing cumulative hits vs. labeled pool size, with
+        a dashed reference line at the total hit ceiling.
+
     """
-    hits_per_iter = (
-        pool_history_df.groupby(["strategy", "iteration"])[value_col]
+    # Count hits per (strategy, seed, iteration), then map to n_labeled
+    hits_per_seed_iter = (
+        pool_history_df.groupby(["strategy", "seed", "iteration"])[value_col]
         .apply(lambda s: (s >= hit_threshold).sum())
         .reset_index(name="n_hits")
     )
     n_labeled = learning_curve_df[
-        ["strategy", "iteration", "n_labeled"]
+        ["strategy", "seed", "iteration", "n_labeled"]
     ].drop_duplicates()
-    hits_df = hits_per_iter.merge(n_labeled, on=["strategy", "iteration"], how="left")
+    hits_df = hits_per_seed_iter.merge(
+        n_labeled, on=["strategy", "seed", "iteration"], how="left"
+    )
 
-    last_iter = pool_history_df["iteration"].max()
-    max_hits = int(
-        pool_history_df[pool_history_df["iteration"] == last_iter]
-        .groupby("strategy")[value_col]
-        .apply(lambda s: (s >= hit_threshold).sum())
-        .max()
+    # Aggregate across seeds: mean ± std per (strategy, n_labeled)
+    # std is NaN when only one seed is present; fill to 0 so bands collapse gracefully
+    hits_summary = (
+        hits_df.groupby(["strategy", "n_labeled"])["n_hits"]
+        .agg(n_hits_mean="mean", n_hits_std="std")
+        .reset_index()
+        .fillna({"n_hits_std": 0})
+    )
+    hits_summary["n_hits_lower"] = (
+        hits_summary["n_hits_mean"] - hits_summary["n_hits_std"]
+    )
+    hits_summary["n_hits_upper"] = np.minimum(
+        hits_summary["n_hits_mean"] + hits_summary["n_hits_std"], max_hits
     )
 
     fig = go.Figure()
 
     for strategy in strategy_order:
-        df_sub = hits_df[hits_df["strategy"] == strategy].sort_values("n_labeled")
+        df_sub = hits_summary[hits_summary["strategy"] == strategy].sort_values(
+            "n_labeled"
+        )
         if df_sub.empty:
             continue
         color = color_map.get(strategy, None) if color_map else None
+
+        # Upper bound — invisible line, anchors the fill
         fig.add_trace(
             go.Scatter(
                 x=df_sub["n_labeled"],
-                y=df_sub["n_hits"],
+                y=df_sub["n_hits_upper"],
+                mode="lines",
+                line=dict(width=0),
+                legendgroup=strategy,
+                showlegend=False,
+                hoverinfo="skip",
+                **({"line_color": color} if color else {}),
+            )
+        )
+        # Lower bound — fills back to the upper bound
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["n_hits_lower"],
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor=(
+                    _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
+                ),
+                legendgroup=strategy,
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        # Mean line
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["n_hits_mean"],
                 mode="lines",
                 name=strategy,
+                legendgroup=strategy,
                 line=dict(width=2, color=color),
             )
         )
@@ -176,7 +241,7 @@ def plot_hit_discovery_curve(
     fig.add_hline(
         y=max_hits,
         line=dict(color="black", width=1.2, dash="dash"),
-        annotation_text=f"Max hits found ({max_hits})",
+        annotation_text=f"Total hits in pool ({max_hits})",
         annotation_position="top right",
     )
 
@@ -184,9 +249,10 @@ def plot_hit_discovery_curve(
         xaxis_title="Number of Labeled Molecules",
         yaxis_title=f"Hits Found ({value_col} ≥ {hit_threshold})",
         legend_title="Strategy",
-        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
-        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1),
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
+        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         plot_bgcolor="white",
+        margin=dict(t=20),
         width=width,
         height=height,
     )
@@ -200,11 +266,11 @@ def plot_calibration_curve_before_after(
     observed_after: np.ndarray,
     label_before="Before calibration",
     label_after="After calibration",
-    width: int = 500,
-    height: int = 500,
+    width: int = 520,
+    height: int = 520,
 ) -> go.Figure:
-    """
-    Interactive plot of diagonal (perfect calibration) and two calibration curves.
+    """Interactive plot of diagonal (perfect calibration) and two calibration curves.
+
     Fills the area between each curve and the diagonal to show miscalibration.
 
     Parameters
@@ -221,6 +287,10 @@ def plot_calibration_curve_before_after(
     Returns
     -------
     go.Figure
+        Interactive Plotly figure with the perfect-calibration diagonal and two
+        calibration curves (before and after isotonic regression), with filled
+        miscalibration areas.
+
     """
     fig = go.Figure()
 
@@ -235,7 +305,7 @@ def plot_calibration_curve_before_after(
         )
     )
 
-    # --- Before calibration ---
+    # Before calibration
     # Diagonal reference (invisible) used as fill anchor
     fig.add_trace(
         go.Scatter(
@@ -253,13 +323,13 @@ def plot_calibration_curve_before_after(
             y=observed_before,
             mode="lines",
             name=label_before,
-            line=dict(color="#d62728", width=2),
+            line=dict(color="#D62728", width=2),
             fill="tonexty",
             fillcolor="rgba(214,39,40,0.1)",
         )
     )
 
-    # --- After calibration ---
+    # After calibration
     # Diagonal reference (invisible) used as fill anchor
     fig.add_trace(
         go.Scatter(
@@ -277,27 +347,38 @@ def plot_calibration_curve_before_after(
             y=observed_after,
             mode="lines",
             name=label_after,
-            line=dict(color="#2ca02c", width=2),
+            line=dict(color="#1f77b4", width=2),
             fill="tonexty",
-            fillcolor="rgba(44,160,44,0.1)",
+            fillcolor="rgba(31,119,180,0.1)",
         )
     )
 
     fig.update_layout(
-        title="Uncertainty Calibration",
         xaxis=dict(
             title="Expected Confidence Level",
             range=[0, 1],
             showgrid=True,
             gridcolor="rgba(0,0,0,0.1)",
+            dtick=0.2,
+            showline=True,
+            linecolor="black",
+            linewidth=1,
+            mirror=True,
         ),
         yaxis=dict(
             title="Observed Proportion",
             range=[0, 1],
             showgrid=True,
             gridcolor="rgba(0,0,0,0.1)",
+            dtick=0.2,
+            showline=True,
+            linecolor="black",
+            linewidth=1,
+            mirror=True,
         ),
+        legend=dict(x=0.02, y=0.98, xanchor="left", yanchor="top", bgcolor="rgba(255,255,255,0.8)"),
         plot_bgcolor="white",
+        margin=dict(t=20, r=20),
         width=width,
         height=height,
     )
@@ -310,8 +391,7 @@ def plot_gtm_selection_animation(
     title: str = "Active Learning Selection (GTM)",
     background_gtm_coords: np.ndarray | None = None,
 ) -> go.Figure:
-    """
-    Animated Plotly scatter of compound selections on a pre-computed GTM embedding.
+    """Animated Plotly scatter of compound selections on a pre-computed GTM embedding.
 
     Renders one frame per active learning iteration with three layers:
     gray background (full pool), blue accumulation (all prior selections),
@@ -339,8 +419,9 @@ def plot_gtm_selection_animation(
     Returns
     -------
     go.Figure
-        Plotly figure with animation frames, a play/pause button, and an
-        iteration slider. Call ``fig.show()`` to render in a Jupyter Notebook.
+        Animated Plotly figure with per-iteration frames, a play/pause button, and
+        an iteration slider. Call ``fig.show()`` to display inline in a Jupyter Notebook.
+
     """
     gtm_coords = np.asarray(gtm_coords)
     if background_gtm_coords is not None:
@@ -538,8 +619,7 @@ def plot_tmap_faerun(
     n_background: int = 0,
     background_point_scale: float = 1.0,
 ) -> Faerun:
-    """
-    Faerun scatter plot of compound selections on a pre-computed TMAP layout.
+    """Faerun scatter plot of compound selections on a pre-computed TMAP layout.
 
     Each compound node is colored by the active learning iteration in which it
     was first selected, using faerun's native categorical colormapping. Compounds
@@ -596,6 +676,7 @@ def plot_tmap_faerun(
         Configured faerun instance. Call ``f.plot(output_name, output_path)``
         to regenerate the HTML, or ``f.plot(output_name, output_path,
         notebook_height=500)`` to display inline in a Jupyter Notebook.
+
     """
     x, y, s, t = tmap_layout
 
@@ -624,7 +705,7 @@ def plot_tmap_faerun(
     # Build a ListedColormap: gray for "Unselected" (index 0), then N viridis
     # colors sampled across the full colormap range for each iteration category.
     # Using a ListedColormap avoids the matplotlib integer-indexing issue where
-    # small integers (0, 1, 2…) all land at the dark end of continuous colormaps.
+    # small integers (0, 1, 2…) all land at the dark end of continuous colormaps
     n_iter = len(iterations)
     base_cmap = mcm.get_cmap(colormap) if isinstance(colormap, str) else colormap
     iter_colors = [base_cmap(i / max(n_iter - 1, 1)) for i in range(n_iter)]
@@ -669,6 +750,220 @@ def plot_tmap_faerun(
     return f
 
 
+def plot_calibration_area_per_iteration(
+    cal_area_df: pd.DataFrame,
+    strategy_order: list[str],
+    color_map: dict | None = None,
+    width: int = 700,
+    height: int = 450,
+) -> go.Figure:
+    """Line plot of miscalibration area per iteration for each strategy.
+
+    Shows both before- and after-calibration values on the same panel. Solid lines
+    represent post-calibration area; dashed lines represent pre-calibration (raw
+    ensemble) area. Both are shown with ±1σ bands aggregated across seeds.
+    Lower values indicate better calibration.
+
+    Parameters
+    ----------
+    cal_area_df : pd.DataFrame
+        Must have columns: ``strategy``, ``n_labeled``,
+        ``miscal_area_mean``, ``miscal_area_lower``, ``miscal_area_upper``,
+        ``miscal_area_pre_cal_mean``, ``miscal_area_pre_cal_lower``,
+        ``miscal_area_pre_cal_upper``.
+    strategy_order : list[str]
+        Strategies to plot, controls legend order.
+    color_map : dict or None, optional
+        Mapping of strategy name to CSS color string.
+    width, height : int, optional
+        Figure dimensions in pixels.
+
+    Returns
+    -------
+    go.Figure
+        Interactive Plotly figure with solid post-calibration lines, dashed
+        pre-calibration lines, and ±1σ bands per strategy.
+
+    """
+    fig = go.Figure()
+
+    for strategy in strategy_order:
+        df_sub = cal_area_df[cal_area_df["strategy"] == strategy].sort_values(
+            "n_labeled"
+        )
+        if df_sub.empty:
+            continue
+
+        color = color_map.get(strategy, None) if color_map else None
+        fill_color = _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
+
+        for prefix, dash, show_legend, label_suffix in [
+            ("miscal_area", "solid", True, ""),
+            ("miscal_area_pre_cal", "dot", True, " (pre-cal)"),
+        ]:
+            # Upper bound — invisible, anchors fill
+            fig.add_trace(
+                go.Scatter(
+                    x=df_sub["n_labeled"],
+                    y=df_sub[f"{prefix}_upper"],
+                    mode="lines",
+                    line=dict(width=0),
+                    legendgroup=f"{strategy}{label_suffix}",
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+            # Lower bound — fills back to upper
+            fig.add_trace(
+                go.Scatter(
+                    x=df_sub["n_labeled"],
+                    y=df_sub[f"{prefix}_lower"],
+                    mode="lines",
+                    line=dict(width=0),
+                    fill="tonexty",
+                    fillcolor=fill_color,
+                    legendgroup=f"{strategy}{label_suffix}",
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+            # Mean line
+            fig.add_trace(
+                go.Scatter(
+                    x=df_sub["n_labeled"],
+                    y=df_sub[f"{prefix}_mean"],
+                    mode="lines",
+                    name=f"{strategy}{label_suffix}",
+                    legendgroup=f"{strategy}{label_suffix}",
+                    showlegend=show_legend,
+                    line=dict(width=2, color=color, dash=dash),
+                )
+            )
+
+    fig.update_layout(
+        xaxis_title="Number of Labeled Molecules",
+        yaxis_title="Miscalibration Area (lower = better)",
+        legend_title="Strategy",
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
+        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
+        plot_bgcolor="white",
+        margin=dict(t=20),
+        width=width,
+        height=height,
+    )
+    return fig
+
+
+def plot_sigma_error_correlation(
+    summary_df: pd.DataFrame,
+    strategy_order: list[str],
+    color_map: dict | None = None,
+    width: int = 700,
+    height: int = 450,
+) -> go.Figure:
+    """Spearman ρ(σ, |error|) vs. labeled pool size for each strategy.
+
+    A positive ρ indicates that the ensemble's predicted standard deviation σ
+    correctly ranks test compounds by how wrong the model is — i.e. high-σ
+    compounds tend to have larger absolute prediction errors. This is a more
+    informative diagnostic than calibration-curve area when calibration and
+    evaluation distributions differ (e.g. scaffold-split holdouts).
+
+    Parameters
+    ----------
+    summary_df : pd.DataFrame
+        Must have columns: ``strategy``, ``n_labeled``,
+        ``sigma_error_rho_mean``, ``sigma_error_rho_lower``,
+        ``sigma_error_rho_upper``.
+    strategy_order : list[str]
+        Strategies to plot, controls legend order.
+    color_map : dict or None, optional
+        Mapping of strategy name to CSS color string.
+    width, height : int, optional
+        Figure dimensions in pixels.
+
+    Returns
+    -------
+    go.Figure
+        Interactive Plotly figure with Spearman ρ(σ, |error|) vs. labeled pool
+        size, with ±1σ bands and a dashed y = 0 reference line.
+
+    """
+    fig = go.Figure()
+
+    # y = 0 reference line
+    fig.add_hline(y=0, line=dict(color="rgba(0,0,0,0.3)", width=1, dash="dash"))
+
+    for strategy in strategy_order:
+        df_sub = summary_df[summary_df["strategy"] == strategy].sort_values("n_labeled")
+        if df_sub.empty:
+            continue
+
+        color = color_map.get(strategy, None) if color_map else None
+        fill_color = _hex_to_rgba(color, 0.15) if color else "rgba(128,128,128,0.15)"
+
+        # Upper bound — invisible, anchors fill
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["sigma_error_rho_upper"],
+                mode="lines",
+                line=dict(width=0),
+                legendgroup=strategy,
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        # Lower bound — fills back to upper
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["sigma_error_rho_lower"],
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor=fill_color,
+                legendgroup=strategy,
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        # Mean line
+        fig.add_trace(
+            go.Scatter(
+                x=df_sub["n_labeled"],
+                y=df_sub["sigma_error_rho_mean"],
+                mode="lines",
+                name=strategy,
+                legendgroup=strategy,
+                showlegend=True,
+                line=dict(width=2, color=color),
+            )
+        )
+
+    fig.update_layout(
+        xaxis_title="Number of Labeled Molecules",
+        yaxis_title="Spearman ρ(σ, |error|)",
+        legend_title="Strategy",
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.1)",
+            gridwidth=1,
+            showline=True,
+            linecolor="black",
+            linewidth=1,
+            mirror=True,
+            # range=[-0.1, 0.3],
+        ),
+        plot_bgcolor="white",
+        margin=dict(t=20),
+        width=width,
+        height=height,
+    )
+    return fig
+
+
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     """Convert a CSS hex color string to an ``rgba()`` string with the given alpha.
 
@@ -684,6 +979,7 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     -------
     str
         CSS ``rgba()`` string, e.g. ``"rgba(170,187,204,0.5)"``.
+
     """
     hex_color = hex_color.lstrip("#")
     if len(hex_color) == 3:
