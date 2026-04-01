@@ -1,3 +1,5 @@
+> Please provide feedback using the comment functionality on GitHub
+
 # Teaching models to ask: active learning for pEC50 prediction
 
 In drug discovery, the most valuable resource is data. Synthesizing and assaying a single compound can cost thousands of dollars and take weeks. Yet, most machine learning models are trained as if labels are free, consuming massive random splits of [ChEMBL](https://www.ebi.ac.uk/chembl/) or [Enamine Real](https://enamine.net/compound-collections/real-compounds/real-database).
