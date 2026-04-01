@@ -1,0 +1,42 @@
+data:
+  # Path to the main labelled dataset (CSV or Parquet). Tilde expansion is applied.
+  dataset_path: data/challenge_train.csv
+  dataset_smiles_col: SMILES
+  dataset_activity_col: pEC50
+
+  # Optional external seed training dataset (CSV). Set to null to skip.
+  # These compounds are always included in the training set at every AL iteration
+  # and are never queried or evaluated.
+  seed_data_path: data/chembl.csv
+  seed_smiles_col: SMILES
+  seed_activity_col: pEC50
+
+active_learning:
+  # Subset of strategies to run. Valid options:
+  # EI, UCB, Random, Exploitation, Exploration, Diversity
+  strategies:
+    - EI
+    - UCB
+    - Random
+    - Exploitation
+    - Exploration
+    - Diversity
+
+  # Split types to run. Valid options: scaffold, random
+  # Each produces a separate setup_<split_type>.pkl and run_<split_type>_*.pkl set.
+  split_types:
+    - scaffold
+    - random
+
+  # Outer seeds used to generate error bands on learning curves.
+  # Each (strategy, seed) pair becomes one HPC job.
+  seeds: [42, 43, 44, 45, 46]
+
+  # Active learning loop parameters
+  k_iter: 10       # Number of AL iterations per run
+  query_size: 100  # Compounds selected from the pool per iteration
+  n_start: 0       # Initial labeled pool size (set to 0 when using --seed-data)
+
+training:
+  n_models: 5      # Committee size (number of bootstrapped ensemble members)
+  max_epochs: 20   # Maximum training epochs per committee member
