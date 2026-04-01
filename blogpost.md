@@ -19,69 +19,39 @@ Here, we combine QBC with [**CheMeleon**](https://github.com/JacksonBurns/chemel
 To reproduce the results in this post, install `openadmet-models` by following the [installation instructions](https://docs.openadmet.org/en/latest/installation.html), then run:
 
 ```bash
-python run.py       # execute the active learning pipeline (~several GPU-hours)
-python analysis.py  # generate all figures from results/all_runs.pkl
+python run.py       # Execute the active learning pipeline (~several GPU-hours)
+python analysis.py  # Generate all figures from results/all_runs.pkl
 ```
 
 All supporting code lives in `src/`: [src/helpers.py](src/helpers.py) contains the core AL utilities and [src/plots.py](src/plots.py) contains all Plotly/Faerun plotting functions.
 
 ## Configuration
 
-The campaign is governed by a handful of parameters in `config.yaml`:
-
-```yaml
-active_learning:
-  k_iter: 20       # number of AL iterations per run
-  query_size: 100  # compounds selected from the pool per iteration
-  n_start: 0       # no initial pool seeding — seed data is used instead
-  seeds: [42, 43, 44, 45, 46]
-
-training:
-  n_models: 5      # committee size (ensemble members)
-```
+The campaign is governed by parameters specified in [`config.yaml`](config.yaml).
 
 The `n_start: 0` setting means no compounds are drawn from the unlabeled pool at the start. Instead, the committee is initialized on an external ChEMBL pretraining set of ~600 PXR-activity measurements (`seed_data_path` in `config.yaml`), which is always included in training but never queried or evaluated. This reflects a realistic scenario where historical data is available from the literature or a public database but the prospective assay set has not yet been touched.
 
 The `query_size` of 100 compounds is grounded in experimental throughput: a standard 1536-well microplate can accommodate roughly 100 compounds when each requires a ~13-point dose-response curve to derive a pEC50 value — one full plate worth of data per AL iteration.
 
-Six acquisition strategies are compared: **EI**, **UCB**, **Random**, **Exploitation**, **Exploration**, and **Diversity**.
-
-## A note on compute
-
-Running a full active learning benchmark is computationally intensive because we retrain the model from scratch at every iteration to simulate a real campaign, repeated for each selection strategy to compare them.
-
-With $k=20$ iterations and 6 strategies, we are performing $20 \times 6 = 120$ full training runs. Each run trains a committee of 5 models. On a standard GPU (e.g. T4 or A10), `run.py` might take several hours to complete. If you want a quick preview, reduce `k_iter` to `5` and `n_models` to `3` in `config.yaml`.
-
-**Note:** The [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) weights (~34MB) will be downloaded from [Zenodo](https://zenodo.org/records/15460715) automatically upon the first run.
+Six acquisition strategies are compared -- **EI**, **UCB**, **Random**, **Exploitation**, **Exploration**, and **Diversity** -- each with **random** and **scaffold** test/train split for evaluation.
 
 ## Load in the reference dataset
 
 We won't be running an actual active learning campaign here for obvious reasons, but we can simulate one using a set of real, experimental data. We pretend we don't know the labels and, at each iteration, use what we learned from each synthetic AL cycle to drive next iteration selections. Rinse and repeat.
 
-The dataset is loaded from a Parquet file and an additional background screening library (`_data/octant_screening_compounds.csv`) is read to provide a chemical-space backdrop for the TMAP / GTM visualizations. Background compounds that overlap with the labeled dataset are excluded.
+The campaign dataset is loaded from `data/challenge_train.csv`, and ChEMBL pretraining data from `data/chembl.csv`. Overlapping compounds are dropped to ensure zero leakage.
 
-## Splitting the data: scaffold-based held-out test set
+## Splitting the data: random and scaffold
 
-Random splitting is dangerously optimistic in drug discovery because it allows structurally similar molecules (analogues) to appear in both training and test sets. A model can "cheat" by memorizing the series rather than learning the [structure-activity relationship (SAR)](https://en.wikipedia.org/wiki/Structure%E2%80%93activity_relationship).
+Random splitting is often an overly optimistic evaluation framing in drug discovery as it allows structurally similar molecules (analogues) to appear in both training and test sets. A model can "cheat" by memorizing the series rather than learning the [structure-activity relationship (SAR)](https://en.wikipedia.org/wiki/Structure%E2%80%93activity_relationship). We include random splitting as an "upper bound" of performance.
 
-We use a **scaffold split** to separate the data based on [Bemis-Murcko scaffolds](https://practicalcheminformatics.blogspot.com/2021/10/exploratory-data-analysis-with.html). This forces the model to generalize to new chemical series, mimicking a prospective lead optimization scenario. This test set is fixed and held out for the entire active learning loop, ensuring a fair, apples-to-apples comparison across all iterations.
-
-```python
-splitter = ScaffoldSplitter(train_size=0.8, val_size=0.0, test_size=0.2, random_state=42)
-X_pool, _, X_test, y_pool, _, y_test, _ = splitter.split(
-    df["OPENADMET_CANONICAL_SMILES"], df["PXR_pEC50"]
-)
-df_pool = pd.DataFrame({"smiles": X_pool, "pEC50": y_pool})
-df_test = pd.DataFrame({"smiles": X_test,  "pEC50": y_test})
-```
+More representative of a lower bound, we also use a **scaffold split** to separate the data based on [Bemis-Murcko scaffolds](https://practicalcheminformatics.blogspot.com/2021/10/exploratory-data-analysis-with.html). This forces the model to generalize to new chemical series, mimicking a prospective lead optimization scenario. Both test sets are fixed and held out for the entire active learning loop, ensuring an apples-to-apples comparison across all iterations.
 
 The 80% training split becomes the **candidate pool** from which the active learner selects new labels, and the 20% test split is the fixed evaluation benchmark held out for the entire campaign.
 
 ## GTM chemical space embedding
 
 The **Diversity** acquisition strategy selects compounds that are maximally dissimilar from the current labeled set in chemical space. To measure structural distance we use a **Generative Topographic Map (GTM)** — a probabilistic manifold projection that maps high-dimensional ECFP4 fingerprints onto an interpretable 2D grid. Each compound gets a single (x, y) coordinate, and pairwise Euclidean distances in that 2D space serve as a fast, interpretable proxy for molecular dissimilarity.
-
-`run.py` fits the GTM once on the full unlabeled pool **plus** the background screening library before the active learning loop starts, so the embedding is fixed and consistent across all strategies. The resulting coordinates are stored in `results/all_runs.pkl` and reused by `analysis.py` for visualization without recomputation.
 
 ## Query-by-committee: how ensemble disagreement guides exploration
 
@@ -105,7 +75,7 @@ To achieve ensemble diversity, we vary the initialization of each ensemble membe
 
 At every iteration, we hold out 10% of the pool-acquired labels as a calibration set (`train_cal`) and use it to fit a **scaling factor** calibrator on the committee's uncertainty estimates. This is a lightweight, single-parameter correction that rescales σ so that coverage intervals better match observed error rates. For the *acquisition function*, this makes no difference: **Exploration**, **EI**, and **UCB** rank unlabeled molecules by σ, and a global scale factor preserves the relative ordering. The committee will still correctly identify that compound A is more uncertain than compound B regardless of whether both σ values are rescaled by the same constant. The calibration matters for the *final model* — so that a "90% interval" actually covers 90% of outcomes — but it does not influence which compounds get queried.
 
-Note that we do not use the held-out `df_test` for calibration. Calibrating on the same scaffold-split test set used to evaluate performance would be circular, and in a real campaign no such external holdout exists. As we discuss in the [calibration section](#are-our-uncertainties-trustworthy), fitting the calibrator on pool-acquired compounds and evaluating it on unseen scaffolds introduces a distribution shift that limits how much the correction can actually help.
+Note that we do not use the held-out `df_test` for calibration. Calibrating on the same test set used to evaluate performance would be circular, and in a real campaign no such external holdout exists. As we discuss in the [calibration section](#are-our-uncertainties-trustworthy), fitting the calibrator on pool-acquired compounds and evaluating it on unseen scaffolds introduces a distribution shift that limits how much the correction can actually help.
 
 ## The active learning loop
 
@@ -119,7 +89,7 @@ In each iteration $k$:
 5. "Acquire" the top $m$ molecules (reveal their labels).
 6. Add them to the `labeled_pool` and repeat.
 
-We track not just accuracy (MAE), but also the *quality* of the molecules we found (their pEC50 values). A good AL strategy should find the potent hits early.
+We track not just accuracy (MAE), but also the *potency* of the molecules we found (their pEC50 values). A good AL strategy should find the active compounds early.
 
 ## Running the experiments
 
@@ -133,27 +103,27 @@ Run `python analysis.py` to generate all figures. They are written to `results/`
 
 ### Learning curves
 
+The strategies converge to near-identical terminal performance. On MAE, **Exploitation** is the weakest at 0.55, **UCB** improves slightly to 0.54, and the remaining four strategies — **EI**, **Random**, **Exploration**, and **Diversity** — all land at 0.52. The differences are small, but the pattern is telling: the two strategies that most aggressively target high predicted pEC50 (Exploitation and UCB) pay a modest accuracy penalty, likely because they concentrate labels in a narrow region of chemical space and leave the rest of the SAR undersampled.
+
 [![Learning curves — MAE (click for interactive version)](results/learning_curve_mae.svg)](results/learning_curve_mae.html)
 
 *Figure 1. Mean absolute error (MAE, pEC50 units) on the held-out scaffold-split test set as a function of labeled pool size, for each of the six acquisition strategies. Shaded bands show ±1 SD across five random seeds.*
+
+On Kendall's τ all methods are indistinguishable at ~0.53, meaning the rank-ordering of predictions is equally good regardless of how compounds were selected.
 
 [![Learning curves — Kendall's τ (click for interactive version)](results/learning_curve_ktau.svg)](results/learning_curve_ktau.html)
 
 *Figure 2. Kendall's τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
 
-The strategies converge to similar but not identical terminal performance. On MAE, **Exploitation** is the weakest at 0.55, **UCB** improves slightly to 0.54, and the remaining four strategies — **EI**, **Random**, **Exploration**, and **Diversity** — all land at 0.52. The differences are small, but the pattern is telling: the two strategies that most aggressively target high predicted pEC50 (Exploitation and UCB) pay a modest accuracy penalty, likely because they concentrate labels in a narrow region of chemical space and leave the rest of the SAR undersampled. On Kendall's τ all methods are indistinguishable at ~0.53, meaning the rank-ordering of predictions is equally good regardless of how compounds were selected.
-
-This is likely a consequence of CheMeleon's pretraining and the large per-iteration batch size. When the base representation is already well-suited to the task, the model extracts near-maximum information from almost any labeled set, and the marginal value of *which* compounds to label diminishes. The 100-compound query batch compounds this further: selecting 100 molecules at once is a coarse-grained update that gives every strategy substantial coverage of chemical space at each step, leaving little room for a smarter selector to pull ahead. Active learning's label-efficiency advantage is most pronounced when the base model is data-hungry and queries are small relative to the pool.
-
-Crucially, even at the start of the campaign — armed only with the ~600 ChEMBL pretraining labels — the MAE is reasonable (~0.7–0.8), thanks to CheMeleon's pretraining. A randomly initialized model would likely be much worse.
+Even at the start of the campaign — armed only with the ~600 ChEMBL pretraining labels — the MAE is reasonable (~0.7–0.8), thanks to CheMeleon's pretraining. A randomly initialized model would be much worse.
 
 ### Hit discovery
+
+Where the strategies *do* diverge is in hit-finding. **Exploitation** and **UCB** recover all but one of the actives in the pool, reflecting their shared bias toward high predicted pEC50 — they converge on the potent region of chemical space efficiently. **EI**, **Random**, and **Diversity** recover a similar but slightly smaller fraction, with **EI**'s explore–exploit balance offering no clear advantage over random at this scale. **Exploration** finds the fewest actives: by ignoring predicted activity entirely and querying only by uncertainty, it maps the epistemic landscape of the model rather than the activity landscape of the assay, spending queries on uninformative regions.
 
 [![Hit discovery curve (click for interactive version)](results/hit_discovery_curve.svg)](results/hit_discovery_curve.html)
 
 *Figure 3. Cumulative number of active compounds (pEC50 ≥ 6.3) recovered as a function of labeled pool size for each acquisition strategy. Exploitation- and UCB-based strategies recover the most actives, reflecting their shared bias toward high predicted activity.*
-
-Where the strategies *do* diverge is in hit-finding. **Exploitation** and **UCB** recover all but one of the actives in the pool, reflecting their shared bias toward high predicted pEC50 — they converge on the potent region of chemical space efficiently. **EI**, **Random**, and **Diversity** recover a similar but slightly smaller fraction, with **EI**'s explore–exploit balance offering no clear advantage over random at this scale. **Exploration** finds the fewest actives: by ignoring predicted activity entirely and querying only by uncertainty, it maps the epistemic landscape of the model rather than the activity landscape of the assay, spending queries on uninformative regions.
 
 ## Navigating chemical space with GTM
 
@@ -165,11 +135,13 @@ We reuse the GTM embedding (fit before the active learning loop) for visualizati
 * **Blue** — compounds acquired in any *prior* iteration (accumulated history)
 * **Red** — compounds selected in the *current* iteration
 
-Use the slider to step through iterations manually, or press **▶ Play** to watch the campaign unfold.
+Use the slider to step through iterations manually, or press **▶ Play** to watch the campaign unfold. In the static version below, points are colored by iteration, as indicated by the color bar.
 
 [![Exploitation compound selection in GTM chemical space — final state colored by iteration (click for interactive animation)](results/gtm_selection_animation_exploitation.svg)](results/gtm_selection_animation_exploitation.html)
 
 *Figure 4. Final-state GTM embedding of the compound pool for the Exploitation strategy. Each point is a compound projected onto the 2D GTM manifold; color indicates the AL iteration in which it was first selected (viridis scale, earlier iterations darker). Gray points were never selected. Click to open the interactive animation with a per-iteration slider.*
+
+[TMAP TEXT HERE]
 
 [![Active learning selection in TMAP chemical space, EI strategy (click for interactive version)](results/tmap_selection.svg)](results/tmap_selection.html)
 
@@ -179,7 +151,7 @@ Use the slider to step through iterations manually, or press **▶ Play** to wat
 
 A model with good MAE can still be overconfident. In active learning, this is dangerous: if the model is confident but wrong about an unlabeled region, it may never query it (for **EI** / **UCB**). We tackled the topic of model uncertainty in another OpenADMET blogpost, [Concerning Uncertainty](https://openadmet.ghost.io/concerning-uncertainty/).
 
-We evaluate calibration using the **miscalibration area**. A perfectly calibrated model has e.g. 90% of data points falling within its 90% confidence interval. At each active learning iteration, 10% of the pool-acquired labels are held out as a training-phase calibration set (`train_cal`) and used to fit a **scaling factor** calibrator on the committee's uncertainty estimates. `analysis.py` then visualises the before/after calibration curves evaluated on the held-out `df_test`.
+We evaluate calibration using the **miscalibration area**. A perfectly calibrated model has e.g. 90% of data points falling within its 90% confidence interval. At each active learning iteration, 10% of the pool-acquired labels are held out as a training-phase calibration set (`train_cal`) and used to fit a **scaling factor** calibrator on the committee's uncertainty estimates.
 
 [![Uncertainty calibration curve before and after scaling-factor calibration (click for interactive version)](results/calibration_curve.svg)](results/calibration_curve.html)
 
@@ -211,10 +183,5 @@ Taken together, the calibration-curve and ρ results paint a consistently unflat
 4. **Diversity ensures coverage**: GTM-based max-min selection prevents scaffold collapse and produces the most structurally diverse labeled set. It is the safest strategy when potency information is completely absent, but sacrifices hit-finding speed.
 5. **Uncertainty estimates are noisy throughout**: The scaling-factor calibration leaves the miscalibration area unchanged because the calibrator is fit on AL-acquired pool compounds and evaluated on structurally distinct test scaffolds — an inherent limitation of post-hoc calibration under distribution shift. But the uncertainty signal is weak even at acquisition time: **Exploration** (pure σ) is the worst hit-finder, and **EI** offers no advantage over **Random**. The ensemble's σ should be treated as a coarse, unreliable signal rather than a trustworthy guide for either coverage or selection.
 6. **Recommendation**: For early-stage hit-finding, use **Exploitation** or **UCB** — they find the most actives. For building a generalizable SAR model, all strategies perform equivalently; **Random** is a perfectly defensible baseline. Use **Diversity** only when structural coverage is the explicit goal.
-
-## Limitations and next steps
-
-- **Time Split**: A scaffold split is a good proxy, but a true temporal split (training on data < 2020, testing on > 2020) is the gold standard.
-- **Batch Awareness**: We selected the top $m$ compounds independently. Advanced "batch active learning" ensures diversity *within* the query batch to avoid selecting identical analogues. The **Diversity** strategy already addresses this implicitly by maximising structural dissimilarity from the labeled set.
 
 Check out the [`openadmet-models`](https://github.com/OpenADMET/openadmet-models) repository for the full code and more advanced featurizers.
