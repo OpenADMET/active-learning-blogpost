@@ -19,8 +19,11 @@ Here, we combine QBC with [**CheMeleon**](https://github.com/JacksonBurns/chemel
 To reproduce the results in this post, install `openadmet-models` by following the [installation instructions](https://docs.openadmet.org/en/latest/installation.html), then run:
 
 ```bash
-python run.py       # Execute the active learning pipeline (~several GPU-hours)
-python analysis.py  # Generate all figures from results/all_runs.pkl
+# Execute the active learning pipeline (~several GPU-hours)
+python run.py   
+
+# Generate all figures from results/all_runs.pkl
+python analysis.py  
 ```
 
 All supporting code lives in `src/`: [src/helpers.py](src/helpers.py) contains the core AL utilities and [src/plots.py](src/plots.py) contains all Plotly/Faerun plotting functions.
@@ -141,9 +144,13 @@ Use the slider to step through iterations manually, or press **▶ Play** to wat
 
 *Figure 4. Final-state GTM embedding of the compound pool for the Exploitation strategy. Each point is a compound projected onto the 2D GTM manifold; color indicates the AL iteration in which it was first selected (viridis scale, earlier iterations darker). Gray points were never selected. Click to open the interactive animation with a per-iteration slider.*
 
-[TMAP TEXT HERE]
+The GTM gives a global view of chemical space on a smooth, regularly sampled 2D lattice. A complementary perspective comes from **TMAP** (Tree-based MAP), which organizes compounds via a **minimum-spanning tree** (MST) built over their MHFP MinHash fingerprint similarities. Where the GTM imposes a regular grid, TMAP respects the actual topology of the data: compounds connected by a gray edge in the overlay are near-neighbors in fingerprint space, and clusters of edges trace branches corresponding roughly to shared scaffolds or chemical series. Branches that are long and bushy indicate chemically diverse, loosely related compounds; short, dense clumps indicate tight structural analogues.
 
-[![Active learning selection in TMAP chemical space, EI strategy (click for interactive version)](results/tmap_selection.svg)](results/tmap_selection.html)
+This structure makes TMAP useful for a question the GTM cannot easily answer: *does the acquisition strategy stay within one branch, or spread across the tree?* A strategy that floods a single dense cluster early — visible as a burst of early-iteration color confined to one region — may find actives quickly but leave entire branches of chemical space unexplored. A strategy that fans outward across the MST provides broader scaffold coverage but may spend queries on uninformative regions far from any potent series.
+
+In the figure below, each point in the TMAP is colored by the first AL iteration it was selected (viridis scale; unselected compounds are light gray). Hover over any point in the interactive version to inspect its SMILES structure directly.
+
+[![Active learning selection in TMAP chemical space, Exploitation strategy (click for interactive version)](results/tmap_selection.svg)](results/tmap_selection.html)
 
 *Figure 5. TMAP layout of the compound pool for the Exploitation strategy, with the minimum-spanning-tree overlay drawn in gray. Point color encodes the first AL iteration in which each compound was selected (viridis scale); unselected compounds are shown in light gray. Click for the interactive Faerun version with SMILES tooltips.*
 
@@ -151,7 +158,7 @@ Use the slider to step through iterations manually, or press **▶ Play** to wat
 
 A model with good MAE can still be overconfident. In active learning, this is dangerous: if the model is confident but wrong about an unlabeled region, it may never query it (for **EI** / **UCB**). We tackled the topic of model uncertainty in another OpenADMET blogpost, [Concerning Uncertainty](https://openadmet.ghost.io/concerning-uncertainty/).
 
-We evaluate calibration using the **miscalibration area**. A perfectly calibrated model has e.g. 90% of data points falling within its 90% confidence interval. At each active learning iteration, 10% of the pool-acquired labels are held out as a training-phase calibration set (`train_cal`) and used to fit a **scaling factor** calibrator on the committee's uncertainty estimates.
+We evaluate calibration using the **miscalibration area**. A perfectly calibrated model has e.g. 90% of data points falling within its 90% confidence interval. At each active learning iteration, 10% of the pool-acquired labels are held out as a training-phase calibration set and used to fit a **scaling factor** calibrator on the committee's uncertainty estimates.
 
 [![Uncertainty calibration curve before and after scaling-factor calibration (click for interactive version)](results/calibration_curve.svg)](results/calibration_curve.html)
 
@@ -161,7 +168,7 @@ We evaluate calibration using the **miscalibration area**. A perfectly calibrate
 
 *Figure 7. Miscalibration area (integrated deviation from perfect calibration) as a function of AL iteration for all six acquisition strategies, shown before and after scaling-factor calibration. Lower values indicate better-calibrated uncertainty estimates.*
 
-The miscalibration area is nearly identical before and after applying the scaling-factor calibration, and it remains flat across all AL iterations. This is not a failure of the calibration method, but a structural consequence of distribution shift: the scaling factor is fit on a holdout of the *AL-acquired pool*, then evaluated on a scaffold-split test set. Miscalibration on structurally novel scaffolds has a systematically different character from miscalibration on the explored pool, so a global scale correction learned on pool compounds does not transfer. A more flexible method such as isotonic regression would not resolve this either — a calibrator trained on one region of chemical space and applied to another is inherently limited regardless of its flexibility.
+The miscalibration area is nearly identical before and after applying the scaling-factor calibration (Figure 6), and it remains flat across all AL iterations (Figure 7). This is not a failure of the calibration method, but a structural consequence of distribution shift: the scaling factor is fit on a holdout of the *AL-acquired pool*, then evaluated on a scaffold-split test set. Miscalibration on structurally novel scaffolds has a systematically different character from miscalibration on the explored pool, so a global scale correction learned on pool compounds does not transfer. A more flexible method such as isotonic regression would not resolve this either — a calibrator trained on one region of chemical space and applied to another is inherently limited regardless of its flexibility.
 
 The flat trajectory also tells us that the committee's uncertainty structure is essentially fixed by the model architecture and training procedure; more labeled data does not change how the ensemble disagrees. This is expected for deep ensembles trained with bootstrap bagging, where all members share the same inductive bias.
 
@@ -178,10 +185,10 @@ Taken together, the calibration-curve and ρ results paint a consistently unflat
 ## Takeaways
 
 1. **Foundation models and large batches flatten label-efficiency gaps**: Strategies converge to near-identical terminal accuracy — all within 0.03 MAE. Exploitation-heavy strategies pay a small accuracy penalty by concentrating labels in a narrow region; the rest reach 0.52 MAE and ~0.53 Kendall's τ. Two factors suppress the advantage of smarter acquisition: CheMeleon's pretraining means any reasonable labeled set produces a capable model, and a 100-compound batch per iteration is a coarse enough update that fine-grained selection strategy differences wash out.
-2. **Hit-finding and model accuracy are separable**: Exploitation and UCB recover nearly all actives in the pool despite no accuracy advantage over Random. The acquisition function shapes *what* the model finds, not *how well* it predicts.
-3. **Exploration is a poor hit-finder**: Sampling purely by uncertainty ($\sigma$) maps the epistemic landscape of the model but ignores the activity landscape of the assay, spending queries on uninformative low-activity regions. It is best understood as a diagnostic: if Exploration outperforms EI, the committee is under-exploring.
+2. **Hit-finding and model accuracy are separable**: **Exploitation** and **UCB** recover nearly all actives in the pool despite no accuracy advantage over Random. The acquisition function shapes *what* the model finds, not *how well* it predicts.
+3. **Exploration is a poor hit-finder**: Sampling purely by uncertainty ($\sigma$) maps the epistemic landscape of the model but ignores the activity landscape of the assay, spending queries on uninformative low-activity regions. It is best understood as a diagnostic: if **Exploration** outperforms **EI**, the committee is under-exploring.
 4. **Diversity ensures coverage**: GTM-based max-min selection prevents scaffold collapse and produces the most structurally diverse labeled set. It is the safest strategy when potency information is completely absent, but sacrifices hit-finding speed.
 5. **Uncertainty estimates are noisy throughout**: The scaling-factor calibration leaves the miscalibration area unchanged because the calibrator is fit on AL-acquired pool compounds and evaluated on structurally distinct test scaffolds — an inherent limitation of post-hoc calibration under distribution shift. But the uncertainty signal is weak even at acquisition time: **Exploration** (pure σ) is the worst hit-finder, and **EI** offers no advantage over **Random**. The ensemble's σ should be treated as a coarse, unreliable signal rather than a trustworthy guide for either coverage or selection.
 6. **Recommendation**: For early-stage hit-finding, use **Exploitation** or **UCB** — they find the most actives. For building a generalizable SAR model, all strategies perform equivalently; **Random** is a perfectly defensible baseline. Use **Diversity** only when structural coverage is the explicit goal.
 
-Check out the [`openadmet-models`](https://github.com/OpenADMET/openadmet-models) repository for the full code and more advanced featurizers.
+Check out the [`openadmet-models`](https://github.com/OpenADMET/openadmet-models) repository for the full code.
