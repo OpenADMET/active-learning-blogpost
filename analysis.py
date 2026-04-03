@@ -23,6 +23,7 @@ Generated outputs (written to ``results/``)::
     sigma_error_correlation.html / .svg       — σ–|error| Spearman ρ per strategy
     gtm_selection_animation_exploitation.html / .svg — animated GTM (Exploitation)
     tmap_selection.html / .svg                — interactive TMAP (Exploitation, via Faerun)
+    tmap_partition.html / .svg                — TMAP colored by train / test partition
     calibration_curve.html / .svg             — before/after scaling factor calibration
 
 Requires ``kaleido`` for SVG export (``pip install kaleido``).
@@ -1032,11 +1033,10 @@ def generate_tmap_figures(
         Y-axis range override for the static matplotlib snapshot.
     """
     print("Generating TMAP visualization...")
-    alp.plot_tmap_faerun(
+    alp.plot_tmap_faerun_strategies(
         tmap_layout,
-        n_background=0,
-        smiles_list=df_pool["smiles"].values,
-        selection_history=all_runs[strategy][0]["history"],
+        smiles_list=list(df_pool["smiles"].values),
+        strategies_histories={s: all_runs[s][0]["history"] for s in all_runs},
         point_scale=3,
         background_point_scale=1,
         title="Active Learning Selection (TMAP)",
@@ -1094,6 +1094,132 @@ def generate_tmap_figures(
         tsm, cax=tmap_cax, label=f"AL Iteration ({strategy})"
     ).ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     fig_static.savefig(f"{results_dir}/tmap_selection.svg", bbox_inches="tight")
+    plt.close(fig_static)
+
+
+def compute_tmap_partition_layout(
+    df_pool: pd.DataFrame, df_test: pd.DataFrame
+) -> tuple:
+    """Compute a joint TMAP layout covering both pool and test compounds.
+
+    Wraps :func:`src.helpers.smiles_to_tmap` on the concatenation of pool and
+    test SMILES so that both partitions appear in the same minimum-spanning-tree
+    embedding.  This layout is separate from the one produced by
+    :func:`compute_tmap_layout` (pool-only), which is used for the AL selection
+    figure.
+
+    Parameters
+    ----------
+    df_pool : pd.DataFrame
+        Pool DataFrame with a ``smiles`` column.
+    df_test : pd.DataFrame
+        Test DataFrame with a ``smiles`` column.
+
+    Returns
+    -------
+    tuple
+        ``(x, y, s, t)`` TMAP layout arrays as returned by
+        :func:`src.helpers.smiles_to_tmap`, with pool compounds first
+        (rows ``0 .. len(df_pool) - 1``) and test compounds last
+        (rows ``len(df_pool) .. len(df_pool) + len(df_test) - 1``).
+    """
+    print("Computing TMAP partition layout (pool + test)...")
+    all_smiles = list(df_pool["smiles"].values) + list(df_test["smiles"].values)
+    return smiles_to_tmap(all_smiles)
+
+
+def generate_tmap_partition_figures(
+    df_pool: pd.DataFrame,
+    df_test: pd.DataFrame,
+    tmap_layout: tuple,
+    results_dir: str | Path,
+    *,
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+) -> None:
+    """Generate train/test partition TMAP visualizations: Faerun HTML and static SVG.
+
+    Writes an interactive Faerun scatter to ``tmap_partition.html`` (pool
+    compounds colored as Train, test compounds as Test) and a static matplotlib
+    snapshot to ``tmap_partition.svg``.
+
+    Parameters
+    ----------
+    df_pool : pd.DataFrame
+        Pool DataFrame with a ``smiles`` column (Train partition).
+    df_test : pd.DataFrame
+        Test DataFrame with a ``smiles`` column (Test partition).
+    tmap_layout : tuple
+        Pre-computed TMAP layout ``(x, y, s, t)`` from
+        :func:`compute_tmap_partition_layout`, covering pool + test compounds in
+        that order.
+    results_dir : str or Path
+        Directory to write output files.
+    xlim : tuple[float, float] or None, optional
+        X-axis range override for the static matplotlib snapshot.
+    ylim : tuple[float, float] or None, optional
+        Y-axis range override for the static matplotlib snapshot.
+    """
+    n_pool = len(df_pool)
+    n_test = len(df_test)
+    all_smiles = list(df_pool["smiles"].values) + list(df_test["smiles"].values)
+    partition_labels = np.concatenate(
+        [np.zeros(n_pool, dtype=int), np.ones(n_test, dtype=int)]
+    )
+
+    print("Generating TMAP partition visualization...")
+    alp.plot_tmap_faerun_partition(
+        tmap_layout,
+        smiles_list=all_smiles,
+        partition_labels=partition_labels,
+        title="Train / Test Partition (TMAP)",
+        output_name="tmap_partition",
+        output_path=f"{results_dir}/",
+    )
+
+    # Static matplotlib snapshot: pool=blue, test=orange
+    print("Generating static TMAP partition snapshot...")
+    tx, ty, ts, tt = tmap_layout
+    train_color = (0.122, 0.467, 0.706, 0.6)   # tab10 blue
+    test_color = (1.0, 0.498, 0.055, 0.9)       # tab10 orange
+
+    point_colors = [
+        train_color if lbl == 0 else test_color for lbl in partition_labels
+    ]
+
+    fig_static, ax = plt.subplots(figsize=(8.5, 8.5))
+    for si, ti in zip(ts, tt):
+        ax.plot(
+            [tx[si], tx[ti]],
+            [ty[si], ty[ti]],
+            color="gray",
+            lw=0.15,
+            alpha=0.3,
+            zorder=1,
+        )
+    ax.scatter(tx, ty, c=point_colors, s=2, linewidths=0, zorder=2)
+    ax.axis("off")
+    fig_static.patch.set_facecolor("white")
+    ax.set_box_aspect(1)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
+    legend_handles = [
+        plt.Line2D(
+            [0], [0],
+            marker="o", color="w", markerfacecolor=train_color[:3], markersize=6,
+            label="Train",
+        ),
+        plt.Line2D(
+            [0], [0],
+            marker="o", color="w", markerfacecolor=test_color[:3], markersize=6,
+            label="Test",
+        ),
+    ]
+    ax.legend(handles=legend_handles, loc="lower right", frameon=False, fontsize=9)
+    fig_static.savefig(f"{results_dir}/tmap_partition.svg", bbox_inches="tight")
     plt.close(fig_static)
 
 
@@ -1175,6 +1301,8 @@ def main() -> None:
     generate_gtm_figures(all_runs, gtm_coords_pool, "results")
     tmap_layout = compute_tmap_layout(df_pool)
     generate_tmap_figures(df_pool, all_runs, tmap_layout, "results")
+    tmap_partition_layout = compute_tmap_partition_layout(df_pool, df_test)
+    generate_tmap_partition_figures(df_pool, df_test, tmap_partition_layout, "results")
 
     export_plotly_svgs(svg_queue)
 
