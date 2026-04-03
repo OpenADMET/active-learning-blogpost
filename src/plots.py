@@ -106,7 +106,7 @@ def plot_learning_curve_with_bands(
         xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         plot_bgcolor="white",
-        margin=dict(t=20),
+        margin=dict(t=40),
         width=width,
         height=height,
     )
@@ -252,7 +252,7 @@ def plot_hit_discovery_curve(
         xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         plot_bgcolor="white",
-        margin=dict(t=20),
+        margin=dict(t=40),
         width=width,
         height=height,
     )
@@ -378,7 +378,7 @@ def plot_calibration_curve_before_after(
         ),
         legend=dict(x=0.02, y=0.98, xanchor="left", yanchor="top", bgcolor="rgba(255,255,255,0.8)"),
         plot_bgcolor="white",
-        margin=dict(t=20, r=20),
+        margin=dict(t=40, r=20),
         width=width,
         height=height,
     )
@@ -847,7 +847,7 @@ def plot_calibration_area_per_iteration(
         xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         plot_bgcolor="white",
-        margin=dict(t=20),
+        margin=dict(t=40),
         width=width,
         height=height,
     )
@@ -957,7 +957,7 @@ def plot_sigma_error_correlation(
             # range=[-0.1, 0.3],
         ),
         plot_bgcolor="white",
-        margin=dict(t=20),
+        margin=dict(t=40),
         width=width,
         height=height,
     )
