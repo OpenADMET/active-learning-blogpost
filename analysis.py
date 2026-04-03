@@ -161,14 +161,19 @@ def _combine_figures_side_by_side(
     # Copy shapes (e.g. add_hline reference lines) from both source figures.
     # Col-1 refs are already correct; col-2 refs need remapping.
     left_shapes = [s.to_plotly_json() for s in (fig_left.layout.shapes or [])]
-    right_shapes = [_remap_for_col2(s.to_plotly_json()) for s in (fig_right.layout.shapes or [])]
+    right_shapes = [
+        _remap_for_col2(s.to_plotly_json()) for s in (fig_right.layout.shapes or [])
+    ]
     if left_shapes or right_shapes:
         combined.update_layout(shapes=left_shapes + right_shapes)
 
     # Copy annotations (e.g. add_hline labels) from both source figures.
     # Append to the existing subplot-title annotations added by make_subplots.
     left_annots = [a.to_plotly_json() for a in (fig_left.layout.annotations or [])]
-    right_annots = [_remap_for_col2(a.to_plotly_json()) for a in (fig_right.layout.annotations or [])]
+    right_annots = [
+        _remap_for_col2(a.to_plotly_json())
+        for a in (fig_right.layout.annotations or [])
+    ]
     if left_annots or right_annots:
         existing = list(combined.layout.annotations or [])
         combined.update_layout(annotations=existing + left_annots + right_annots)
@@ -184,11 +189,13 @@ def _combine_figures_side_by_side(
     # because make_subplots assigns those and they differ per panel.
     _SKIP = {"title", "domain", "anchor", "matches", "scaleanchor", "scaleratio"}
     _xstyle = {
-        k: v for k, v in fig_left.layout.xaxis.to_plotly_json().items()
+        k: v
+        for k, v in fig_left.layout.xaxis.to_plotly_json().items()
         if k not in _SKIP
     }
     _ystyle = {
-        k: v for k, v in fig_left.layout.yaxis.to_plotly_json().items()
+        k: v
+        for k, v in fig_left.layout.yaxis.to_plotly_json().items()
         if k not in _SKIP
     }
     if _xstyle:
@@ -204,7 +211,9 @@ def _combine_figures_side_by_side(
 
     w = fig_left.layout.width or 700
     h = fig_left.layout.height or 450
-    _bottom_margin = fig_left.layout.margin.b if fig_left.layout.margin.b is not None else 80
+    _bottom_margin = (
+        fig_left.layout.margin.b if fig_left.layout.margin.b is not None else 80
+    )
     combined.update_layout(width=w * 2, height=h, margin=dict(t=_bottom_margin))
     return combined
 
@@ -1148,19 +1157,19 @@ def main() -> None:
     svg_queue: list[tuple] = []
 
     generate_learning_curve_mae(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 1.15)
+        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.85)
     )
     generate_learning_curve_ktau(
         per_split_data, cfg, "results", svg_queue, ylim=(0, 0.65)
     )
     generate_hit_discovery_curve(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 22)
+        per_split_data, cfg, "results", svg_queue, ylim=(0, 23)
     )
     generate_calibration_area_per_iteration(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.45)
+        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.4)
     )
     generate_sigma_error_correlation(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.45)
+        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.25)
     )
     generate_calibration_curve(all_runs, df_test, "results", svg_queue)
     generate_gtm_figures(all_runs, gtm_coords_pool, "results")
