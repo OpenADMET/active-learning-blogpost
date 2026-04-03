@@ -607,6 +607,63 @@ def plot_gtm_selection_animation(
     return fig
 
 
+def _build_iteration_categories(
+    selection_history: list[dict],
+    n_points: int,
+    colormap: str | mcolors.Colormap = "viridis",
+) -> tuple[np.ndarray, mcolors.ListedColormap, list[tuple]]:
+    """Build per-compound iteration category data for a single selection history.
+
+    Encodes which AL iteration first selected each compound.  Index 0 is
+    reserved for "Unselected" (gray); indices 1..N map to the sorted iteration
+    numbers.
+
+    Parameters
+    ----------
+    selection_history : list[dict]
+        Per-iteration state dicts from ``run_active_learning``, each containing
+        ``"iteration"`` and ``"selected_pool_indices"``.
+    n_points : int
+        Total number of points (pool + any background).  Must be ≥ the maximum
+        pool index referenced in ``selection_history``.
+    colormap : str or Colormap, optional
+        Matplotlib colormap for the iteration colors.  Default ``"viridis"``.
+
+    Returns
+    -------
+    c : np.ndarray
+        Integer array of length ``n_points``.  0 = Unselected, k = iteration
+        category k (1-based).
+    listed_cmap : mcolors.ListedColormap
+        ListedColormap with gray at index 0 and one viridis color per iteration.
+    legend_labels : list of tuple
+        ``[(category_int, label_str), ...]`` suitable for Faerun's
+        ``legend_labels`` argument.
+    """
+    iterations = sorted({state["iteration"] for state in selection_history})
+    iter_to_cat = {it: idx + 1 for idx, it in enumerate(iterations)}
+    legend_labels = [(0, "Unselected")] + [
+        (idx + 1, str(it)) for idx, it in enumerate(iterations)
+    ]
+
+    c = np.zeros(n_points, dtype=int)
+    for state in selection_history:
+        cat = iter_to_cat[state["iteration"]]
+        for idx in state["selected_pool_indices"]:
+            if c[idx] == 0:
+                c[idx] = cat
+
+    n_iter = len(iterations)
+    base_cmap = mcm.get_cmap(colormap) if isinstance(colormap, str) else colormap
+    iter_colors = [base_cmap(i / max(n_iter - 1, 1)) for i in range(n_iter)]
+    listed_cmap = mcolors.ListedColormap(
+        [(0.55, 0.55, 0.55, 1.0)] + iter_colors,
+        N=1 + n_iter,
+    )
+
+    return c, listed_cmap, legend_labels
+
+
 def plot_tmap_faerun(
     tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     smiles_list: list[str],
@@ -680,39 +737,15 @@ def plot_tmap_faerun(
     """
     x, y, s, t = tmap_layout
 
-    # Build iteration label per compound: index 0 = "Unselected", index k+1 = str(k)
-    iterations = sorted({state["iteration"] for state in selection_history})
-    # Category 0 is reserved for "Unselected"
-    iter_to_cat = {it: idx + 1 for idx, it in enumerate(iterations)}
-    legend_labels = [(0, "Unselected")] + [
-        (idx + 1, str(it)) for idx, it in enumerate(iterations)
-    ]
-
-    # Pool molecules: colored by first-selected iteration; background molecules: gray (0)
-    c = np.zeros(len(x), dtype=int)
-    for state in selection_history:
-        cat = iter_to_cat[state["iteration"]]
-        for idx in state["selected_pool_indices"]:
-            if c[idx] == 0:  # keep the first iteration that selected this compound
-                c[idx] = cat
+    c, listed_cmap, legend_labels = _build_iteration_categories(
+        selection_history, len(x), colormap
+    )
 
     # Per-point sizes: foreground uses point_scale, background uses background_point_scale
     n_pool = len(x) - n_background
     s_vals = np.full(len(x), point_scale, dtype=float)
     if n_background > 0:
         s_vals[n_pool:] = background_point_scale
-
-    # Build a ListedColormap: gray for "Unselected" (index 0), then N viridis
-    # colors sampled across the full colormap range for each iteration category.
-    # Using a ListedColormap avoids the matplotlib integer-indexing issue where
-    # small integers (0, 1, 2…) all land at the dark end of continuous colormaps
-    n_iter = len(iterations)
-    base_cmap = mcm.get_cmap(colormap) if isinstance(colormap, str) else colormap
-    iter_colors = [base_cmap(i / max(n_iter - 1, 1)) for i in range(n_iter)]
-    listed_cmap = mcolors.ListedColormap(
-        [(0.55, 0.55, 0.55, 1.0)] + iter_colors,
-        N=1 + n_iter,
-    )
 
     f = Faerun(
         title=title,
@@ -735,6 +768,200 @@ def plot_tmap_faerun(
         categorical=True,
         has_legend=True,
         legend_title="AL Iteration",
+        legend_labels=legend_labels,
+        point_scale=1.0,
+        shader="smoothCircle",
+    )
+
+    f.add_tree(
+        "tmap_tree",
+        {"from": s, "to": t, "x": x, "y": y},
+        point_helper="tmap",
+    )
+
+    f.plot(output_name, output_path, template="smiles")
+    return f
+
+
+def plot_tmap_faerun_strategies(
+    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    smiles_list: list[str],
+    strategies_histories: dict[str, list[dict]],
+    output_name: str = "tmap_selection",
+    output_path: str = "./",
+    title: str = "Active Learning Selection (TMAP)",
+    colormap: str = "viridis",
+    point_scale: float = 3.0,
+    n_background: int = 0,
+    background_point_scale: float = 1.0,
+) -> Faerun:
+    """Faerun scatter plot of compound selections for multiple strategies with dropdown.
+
+    Each strategy is a separate Faerun series selectable via a dropdown in the
+    viewer.  Within each series, nodes are colored by the AL iteration in which
+    the compound was first selected; unselected compounds are gray.  The MST is
+    drawn as a tree layer shared across all series.
+
+    Parameters
+    ----------
+    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ``(x, y, s, t)`` as returned by ``helpers.smiles_to_tmap``.
+    smiles_list : list[str]
+        SMILES strings in the same row order as ``tmap_layout``.
+    strategies_histories : dict[str, list[dict]]
+        Mapping from strategy name to its per-iteration state dicts
+        (e.g. ``all_runs[strategy][0]["history"]`` for seed 0).  Keys become
+        the dropdown labels in the Faerun viewer.
+    output_name : str, optional
+        Base filename (without extension) for faerun's HTML output.
+    output_path : str, optional
+        Directory in which to write the output file.
+    title : str, optional
+        Plot title.
+    colormap : str, optional
+        Matplotlib colormap name for iteration colors. Default ``"viridis"``.
+    point_scale : float, optional
+        Relative size of pool (foreground) scatter points. Default 3.0.
+    n_background : int, optional
+        Number of background molecules appended at the end of ``tmap_layout``
+        / ``smiles_list``. Default is 0.
+    background_point_scale : float, optional
+        Relative size of background scatter points. Default 1.0.
+
+    Returns
+    -------
+    Faerun
+        Configured faerun instance.
+    """
+    x, y, s, t = tmap_layout
+    n_pool = len(x) - n_background
+    s_vals = np.full(len(x), point_scale, dtype=float)
+    if n_background > 0:
+        s_vals[n_pool:] = background_point_scale
+
+    all_c: list[np.ndarray] = []
+    all_cmaps: list[mcolors.ListedColormap] = []
+    all_legend_labels: list[list[tuple]] = []
+
+    for history in strategies_histories.values():
+        c, listed_cmap, legend_labels = _build_iteration_categories(
+            history, len(x), colormap
+        )
+        all_c.append(c)
+        all_cmaps.append(listed_cmap)
+        all_legend_labels.append(legend_labels)
+
+    n_strategies = len(strategies_histories)
+    strategy_names = list(strategies_histories.keys())
+
+    f = Faerun(
+        title=title,
+        clear_color="#111111",
+        coords=False,
+        view="front",
+        thumbnail_width=500,
+    )
+
+    f.add_scatter(
+        "tmap",
+        {
+            "x": x,
+            "y": y,
+            "c": all_c,
+            "s": [s_vals] * n_strategies,
+            "labels": smiles_list,
+        },
+        colormap=all_cmaps,
+        categorical=[True] * n_strategies,
+        has_legend=True,
+        legend_title=["AL Iteration"] * n_strategies,
+        legend_labels=all_legend_labels,
+        series_title=strategy_names,
+        point_scale=1.0,
+        shader="smoothCircle",
+    )
+
+    f.add_tree(
+        "tmap_tree",
+        {"from": s, "to": t, "x": x, "y": y},
+        point_helper="tmap",
+    )
+
+    f.plot(output_name, output_path, template="smiles")
+    return f
+
+
+def plot_tmap_faerun_partition(
+    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    smiles_list: list[str],
+    partition_labels: np.ndarray,
+    output_name: str = "tmap_partition",
+    output_path: str = "./",
+    title: str = "Train / Test Partition (TMAP)",
+    train_color: tuple = (0.122, 0.467, 0.706, 1.0),
+    test_color: tuple = (1.0, 0.498, 0.055, 1.0),
+    point_scale: float = 3.0,
+) -> Faerun:
+    """Faerun scatter plot of pool and test compounds on a pre-computed TMAP layout.
+
+    Each node is colored by its data partition: ``"Train"`` (pool) or ``"Test"``.
+    SMILES strings are embedded as labels for tooltip display. The TMAP
+    minimum-spanning-tree is drawn as a tree layer.
+
+    Parameters
+    ----------
+    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ``(x, y, s, t)`` as returned by ``helpers.smiles_to_tmap``, computed on
+        **all** molecules in the order ``pool_smiles + test_smiles``.
+    smiles_list : list[str]
+        SMILES strings in the same row order as ``tmap_layout``.
+    partition_labels : np.ndarray
+        Integer array of length ``len(smiles_list)``. ``0`` = Train (pool),
+        ``1`` = Test.
+    output_name : str, optional
+        Base filename (without extension) for faerun's HTML output.
+    output_path : str, optional
+        Directory in which to write the output file.
+    title : str, optional
+        Plot title.
+    train_color : tuple, optional
+        RGBA color for Train (pool) nodes. Default is matplotlib tab10 blue.
+    test_color : tuple, optional
+        RGBA color for Test nodes. Default is matplotlib tab10 orange.
+    point_scale : float, optional
+        Relative size of scatter points. Default 3.0.
+
+    Returns
+    -------
+    Faerun
+        Configured faerun instance.
+    """
+    x, y, s, t = tmap_layout
+
+    legend_labels = [(0, "Train"), (1, "Test")]
+    listed_cmap = mcolors.ListedColormap([train_color, test_color], N=2)
+
+    f = Faerun(
+        title=title,
+        clear_color="#111111",
+        coords=False,
+        view="front",
+        thumbnail_width=500,
+    )
+
+    f.add_scatter(
+        "tmap",
+        {
+            "x": x,
+            "y": y,
+            "c": partition_labels.tolist(),
+            "s": np.full(len(x), point_scale, dtype=float),
+            "labels": smiles_list,
+        },
+        colormap=listed_cmap,
+        categorical=True,
+        has_legend=True,
+        legend_title="Partition",
         legend_labels=legend_labels,
         point_scale=1.0,
         shader="smoothCircle",
