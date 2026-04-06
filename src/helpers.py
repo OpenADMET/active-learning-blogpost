@@ -249,7 +249,7 @@ def featurize(smiles_list: list[str], y_list: list[float] | np.ndarray | None = 
     return loader, scaler
 
 
-def build_committee_member(seed: int = 42, max_epochs: int = 20, log_dir: str | bool = False) -> tuple:
+def build_committee_member(seed: int = 42, max_epochs: int = 20, log_dir: str | bool = False, use_chemeleon: bool = True) -> tuple:
     """Construct a single ChemProp committee member paired with a LightningTrainer.
 
     Parameters
@@ -262,6 +262,9 @@ def build_committee_member(seed: int = 42, max_epochs: int = 20, log_dir: str | 
     log_dir : str or False, optional
         Output directory for training logs and checkpoints. Pass ``False`` (or
         ``None``) to disable logging. Default is False.
+    use_chemeleon : bool, optional
+        Whether to initialise the model from CheMeleon pretrained weights.
+        Set to ``False`` for random-initialisation ablations. Default is True.
 
     Returns
     -------
@@ -276,7 +279,7 @@ def build_committee_member(seed: int = 42, max_epochs: int = 20, log_dir: str | 
     # Define the model
     model = ChemPropModel(
         n_tasks=1,
-        from_chemeleon=True,
+        from_chemeleon=use_chemeleon,
         ffn_hidden_dim=512,
         ffn_hidden_num_layers=3,
         mpnn_lr=1e-4,
@@ -319,6 +322,7 @@ def train_committee(
     n_models: int = 5,
     seed: int = 42,
     max_epochs: int = 20,
+    use_chemeleon: bool = True,
 ) -> CommitteeRegressor:
     """Train a committee of ChemProp models on bootstrapped data.
 
@@ -338,6 +342,10 @@ def train_committee(
         Default is 42.
     max_epochs : int, optional
         Maximum training epochs per committee member. Default is 20.
+    use_chemeleon : bool, optional
+        Whether to initialise each committee member from CheMeleon pretrained
+        weights. Set to ``False`` for random-initialisation ablations.
+        Default is True.
 
     Returns
     -------
@@ -352,7 +360,7 @@ def train_committee(
         with tempfile.TemporaryDirectory(prefix="al_logs_") as tmp_dir:
             # Build and seed member first so pl.seed_everything controls dataloader shuffle
             model, trainer = build_committee_member(
-                seed=seed + i, max_epochs=max_epochs, log_dir=tmp_dir
+                seed=seed + i, max_epochs=max_epochs, log_dir=tmp_dir, use_chemeleon=use_chemeleon
             )
 
             # Bootstrap resampling
@@ -544,6 +552,7 @@ def run_active_learning(
     verbose: bool = True,
     df_seed: pd.DataFrame | None = None,
     gtm_coords: np.ndarray | None = None,
+    use_chemeleon: bool = True,
 ) -> dict:
     """Execute a full active learning loop for one strategy and seed.
 
@@ -593,6 +602,10 @@ def run_active_learning(
         saving significant compute per job. Required for the ``"Diversity"``
         strategy; other strategies pass these coords through to ``query_batch``
         but do not use them. Default is None (GTM is computed on-the-fly).
+    use_chemeleon : bool, optional
+        Whether to initialise each committee member from CheMeleon pretrained
+        weights. Set to ``False`` for random-initialisation ablations.
+        Default is True.
 
     Returns
     -------
@@ -698,6 +711,7 @@ def run_active_learning(
             n_models=n_models,
             max_epochs=max_epochs,
             seed=seed + k,
+            use_chemeleon=use_chemeleon,
         )
 
         # Evaluate BEFORE calibration (stored for visualization)

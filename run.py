@@ -262,6 +262,7 @@ def run_job(strategy: str, seed: int, split_type: str, setup: dict) -> None:
         verbose=True,
         df_seed=setup.get("df_seed"),
         gtm_coords=setup["gtm_coords_pool"],
+        use_chemeleon=cfg.use_chemeleon,
     )
 
     with open(out_path, "wb") as fh:
