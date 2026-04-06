@@ -61,6 +61,11 @@ class ALConfig:
         Committee size — number of bootstrapped ensemble members (> 0).
     max_epochs : int
         Maximum training epochs per committee member (> 0).
+    use_chemeleon : bool
+        Whether to initialise each committee member from CheMeleon pretrained
+        weights (``from_chemeleon`` argument of ``ChemPropModel``). Set to
+        ``False`` to train from random initialisation for ablation comparisons.
+        Default is ``True``.
 
     """
 
@@ -78,6 +83,7 @@ class ALConfig:
     n_start: int
     n_models: int
     max_epochs: int
+    use_chemeleon: bool
 
 
 def load_config(path: str | Path = "config.yaml") -> ALConfig:
@@ -208,6 +214,13 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
     n_models = _require_pos_int(tr, "n_models", "training")
     max_epochs = _require_pos_int(tr, "max_epochs", "training")
 
+    # use_chemeleon: optional bool, defaults to True for backward compatibility
+    use_chemeleon = tr.get("use_chemeleon", True)
+    if not isinstance(use_chemeleon, bool):
+        errors.append(
+            f"[training] 'use_chemeleon' must be a boolean (true/false), got {use_chemeleon!r}"
+        )
+
     # n_start: 0 is valid (seed-data-only bootstrapping)
     n_start = al.get("n_start")
     if n_start is None:
@@ -246,4 +259,5 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         n_start=n_start,
         n_models=n_models,
         max_epochs=max_epochs,
+        use_chemeleon=use_chemeleon,
     )
