@@ -16,7 +16,7 @@ import yaml
 _VALID_STRATEGIES = ["EI", "UCB", "Random", "Exploitation", "Exploration", "Diversity"]
 
 # Valid split-type options
-_VALID_SPLIT_TYPES = ["scaffold", "random"]
+_VALID_SPLIT_TYPES = ["scaffold", "random", "cluster"]
 
 
 @dataclass
@@ -66,6 +66,17 @@ class ALConfig:
         weights (``from_chemeleon`` argument of ``ChemPropModel``). Set to
         ``False`` to train from random initialisation for ablation comparisons.
         Default is ``True``.
+    cluster_method : str
+        Clustering algorithm used when ``split_types`` includes ``"cluster"``.
+        One of ``"butina"``, ``"kmeans"``, or ``"bemis-murcko"``. Default is
+        ``"butina"``.
+    cluster_k_clusters : int
+        Number of clusters for the k-means clustering method. Ignored when
+        ``cluster_method`` is not ``"kmeans"``. Default is ``10``.
+    cluster_butina_cutoff : float
+        Tanimoto distance threshold for Butina clustering. Must be in (0, 1).
+        Ignored when ``cluster_method`` is not ``"butina"``. Default is
+        ``0.65``.
 
     """
 
@@ -84,6 +95,9 @@ class ALConfig:
     n_models: int
     max_epochs: int
     use_chemeleon: bool
+    cluster_method: str
+    cluster_k_clusters: int
+    cluster_butina_cutoff: float
 
 
 def load_config(path: str | Path = "config.yaml") -> ALConfig:
@@ -118,6 +132,7 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
     data = raw.get("data", {})
     al = raw.get("active_learning", {})
     tr = raw.get("training", {})
+    cl = raw.get("clustering", {})
 
     errors: list[str] = []
 
@@ -221,6 +236,32 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
             f"[training] 'use_chemeleon' must be a boolean (true/false), got {use_chemeleon!r}"
         )
 
+    # clustering parameters: all optional with sensible defaults so existing configs
+    # without a 'clustering:' section continue to load without errors
+    _valid_cluster_methods = ["butina", "kmeans", "bemis-murcko"]
+    cluster_method = cl.get("method", "butina")
+    if not isinstance(cluster_method, str) or cluster_method not in _valid_cluster_methods:
+        errors.append(
+            f"[clustering] 'method' must be one of {_valid_cluster_methods}, "
+            f"got {cluster_method!r}"
+        )
+
+    cluster_k_clusters = cl.get("k_clusters", 10)
+    if not isinstance(cluster_k_clusters, int) or cluster_k_clusters <= 0:
+        errors.append(
+            f"[clustering] 'k_clusters' must be a positive integer, got {cluster_k_clusters!r}"
+        )
+
+    cluster_butina_cutoff = cl.get("butina_cutoff", 0.65)
+    if (
+        not isinstance(cluster_butina_cutoff, (int, float))
+        or not (0 < cluster_butina_cutoff < 1)
+    ):
+        errors.append(
+            f"[clustering] 'butina_cutoff' must be a float in (0, 1), "
+            f"got {cluster_butina_cutoff!r}"
+        )
+
     # n_start: 0 is valid (seed-data-only bootstrapping)
     n_start = al.get("n_start")
     if n_start is None:
@@ -260,4 +301,7 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         n_models=n_models,
         max_epochs=max_epochs,
         use_chemeleon=use_chemeleon,
+        cluster_method=cluster_method,
+        cluster_k_clusters=cluster_k_clusters,
+        cluster_butina_cutoff=cluster_butina_cutoff,
     )

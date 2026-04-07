@@ -25,7 +25,7 @@ Usage
 HPC workflow example (SLURM)
 -----------------------------
     python run.py --setup-only
-    for split in scaffold random; do
+    for split in scaffold random cluster; do
         for strat in EI UCB Random Exploitation Exploration Diversity; do
             for seed in 42 43 44 45 46; do
                 sbatch --job-name=al_${split}_${strat}_${seed} \\
@@ -56,6 +56,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from openadmet.models.split.cluster import ClusterSplitter
 from openadmet.models.split.scaffold import ScaffoldSplitter
 from openadmet.models.split.sklearn import ShuffleSplitter
 
@@ -75,17 +76,20 @@ def run_setup(cfg: ALConfig, split_type: str) -> dict:
     """Load data, split, fit GTM embedding, and optionally load seed data.
 
     Reads the dataset from the path specified in ``cfg``, performs an 80/20
-    split (scaffold or random) into pool and test sets, fits a GTM on the pool
-    for visualization, and (optionally) loads an external seed training dataset
-    while deduplicating it against pool and test compounds to prevent leakage.
+    split (scaffold, random, or cluster) into pool and test sets, fits a GTM on
+    the pool for visualization, and (optionally) loads an external seed training
+    dataset while deduplicating it against pool and test compounds to prevent
+    leakage.
 
     Parameters
     ----------
     cfg : ALConfig
         Validated experiment configuration loaded via ``load_config()``.
     split_type : str
-        One of ``"scaffold"`` or ``"random"``. Controls whether
-        ``ScaffoldSplitter`` or ``ShuffleSplitter`` is used.
+        One of ``"scaffold"``, ``"random"``, or ``"cluster"``. Controls which
+        splitter is used. For ``"cluster"``, the clustering parameters are taken
+        from ``cfg.cluster_method``, ``cfg.cluster_k_clusters``, and
+        ``cfg.cluster_butina_cutoff``.
 
     Returns
     -------
@@ -120,6 +124,16 @@ def run_setup(cfg: ALConfig, split_type: str) -> dict:
     if split_type == "scaffold":
         splitter = ScaffoldSplitter(
             train_size=0.8, val_size=0.0, test_size=0.2, random_state=42
+        )
+    elif split_type == "cluster":
+        splitter = ClusterSplitter(
+            train_size=0.8,
+            val_size=0.0,
+            test_size=0.2,
+            random_state=42,
+            method=cfg.cluster_method,
+            k_clusters=cfg.cluster_k_clusters,
+            butina_cutoff=cfg.cluster_butina_cutoff,
         )
     else:
         splitter = ShuffleSplitter(
@@ -193,7 +207,7 @@ def load_or_run_setup(split_type: str, config_path: str = "config.yaml") -> dict
     Parameters
     ----------
     split_type : str
-        One of ``"scaffold"`` or ``"random"``.
+        One of ``"scaffold"``, ``"random"``, or ``"cluster"``.
     config_path : str, optional
         Path to the YAML config file, used only when setup must be computed.
 
@@ -234,7 +248,7 @@ def run_job(strategy: str, seed: int, split_type: str, setup: dict) -> None:
     seed : int
         Outer random seed for this run (must be present in ``cfg.seeds``).
     split_type : str
-        Dataset split type used for this job (``"scaffold"`` or ``"random"``).
+        Dataset split type used for this job (``"scaffold"``, ``"random"``, or ``"cluster"``).
     setup : dict
         Shared setup checkpoint as returned by ``load_or_run_setup()``.
 
