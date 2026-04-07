@@ -14,6 +14,7 @@ the scaffold split only (fallback to the first available split type).
 Usage
 -----
     python analysis.py
+    python analysis.py --results-dir /path/to/results
 
 Generated outputs (written to ``results/``)::
     learning_curve_mae.html / .svg            — MAE learning curves per strategy
@@ -29,6 +30,7 @@ Generated outputs (written to ``results/``)::
 Requires ``kaleido`` for SVG export (``pip install kaleido``).
 """
 
+import argparse
 import asyncio
 import logging
 import os
@@ -1252,7 +1254,7 @@ def main() -> None:
 
     Orchestrates the full analysis pipeline:
 
-    1. Load setup and job-result pickles from ``results/``.
+    1. Load setup and job-result pickles from the results directory.
     2. Run sanity checks on coverage and consistency.
     3. Assemble tidy DataFrames and per-strategy statistics for each split type.
     4. Generate all figures, writing HTML files and queuing SVG exports.
@@ -1262,12 +1264,25 @@ def main() -> None:
     and ``ylim`` keyword arguments to the corresponding ``generate_*`` functions
     below.
     """
-    setups = load_setups("results")
+    parser = argparse.ArgumentParser(
+        description="Analysis and visualisation for the active learning pipeline."
+    )
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        metavar="DIR",
+        help="Directory containing setup_*.pkl and run_*.pkl files, and where "
+        "output figures are written. Default: results",
+    )
+    args = parser.parse_args()
+    results_dir = args.results_dir
+
+    setups = load_setups(results_dir)
     cfg: ALConfig = next(iter(setups.values()))["config"]
     available_split_types = list(setups.keys())
     print(f"Split types loaded: {available_split_types}")
 
-    job_results = load_job_results("results")
+    job_results = load_job_results(results_dir)
     run_sanity_checks(setups, job_results, cfg)
     per_split_data = build_split_data(setups, job_results, cfg)
 
@@ -1279,34 +1294,34 @@ def main() -> None:
     df_test = per_split_data[_primary]["df_test"]
     gtm_coords_pool = per_split_data[_primary]["gtm_coords_pool"]
 
-    Path("results").mkdir(exist_ok=True)
+    Path(results_dir).mkdir(parents=True, exist_ok=True)
     svg_queue: list[tuple] = []
 
     generate_learning_curve_mae(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.85)
+        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.85)
     )
     generate_learning_curve_ktau(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.65)
+        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.65)
     )
     generate_hit_discovery_curve(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 23)
+        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 23)
     )
     generate_calibration_area_per_iteration(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.4)
+        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.4)
     )
     generate_sigma_error_correlation(
-        per_split_data, cfg, "results", svg_queue, ylim=(0, 0.25)
+        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.25)
     )
-    generate_calibration_curve(all_runs, df_test, "results", svg_queue)
-    generate_gtm_figures(all_runs, gtm_coords_pool, "results")
+    generate_calibration_curve(all_runs, df_test, results_dir, svg_queue)
+    generate_gtm_figures(all_runs, gtm_coords_pool, results_dir)
     tmap_layout = compute_tmap_layout(df_pool)
-    generate_tmap_figures(df_pool, all_runs, tmap_layout, "results")
+    generate_tmap_figures(df_pool, all_runs, tmap_layout, results_dir)
     tmap_partition_layout = compute_tmap_partition_layout(df_pool, df_test)
-    generate_tmap_partition_figures(df_pool, df_test, tmap_partition_layout, "results")
+    generate_tmap_partition_figures(df_pool, df_test, tmap_partition_layout, results_dir)
 
     export_plotly_svgs(svg_queue)
 
-    print("\nAll visualizations saved to results/")
+    print(f"\nAll visualizations saved to {results_dir}/")
     # kaleido v1 leaves a non-daemon background thread that prevents a clean exit;
     # os._exit(0) terminates immediately after all writes complete
     os._exit(0)

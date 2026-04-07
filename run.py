@@ -47,6 +47,8 @@ Per-job format (results/run_<split_type>_<STRATEGY>_seed<N>.pkl)
 -----------------------------------------------------------------
     {"split_type": str, "strategy": str, "seed": int, "n_start": int,
      "result": {history, committee}}
+
+Use ``--results-dir`` to write outputs to a custom directory (default: ``results``).
 """
 
 import argparse
@@ -72,7 +74,7 @@ warnings.filterwarnings("ignore")
 # ── Setup phase ────────────────────────────────────────────────────────────────
 
 
-def run_setup(cfg: ALConfig, split_type: str) -> dict:
+def run_setup(cfg: ALConfig, split_type: str, results_dir: Path = Path("results")) -> dict:
     """Load data, split, fit GTM embedding, and optionally load seed data.
 
     Reads the dataset from the path specified in ``cfg``, performs an 80/20
@@ -90,6 +92,9 @@ def run_setup(cfg: ALConfig, split_type: str) -> dict:
         splitter is used. For ``"cluster"``, the clustering parameters are taken
         from ``cfg.cluster_method``, ``cfg.cluster_k_clusters``, and
         ``cfg.cluster_butina_cutoff``.
+    results_dir : Path, optional
+        Directory where output files (plots, pickles) are written.
+        Default is ``Path("results")``.
 
     Returns
     -------
@@ -115,8 +120,8 @@ def run_setup(cfg: ALConfig, split_type: str) -> dict:
     ax.set_title("PXR pEC50 Distribution")
     ax.set_xlabel("pEC50", fontweight="bold")
     ax.set_ylabel("Count", fontweight="bold")
-    Path("results").mkdir(exist_ok=True)
-    fig.savefig("results/pec50_distribution.png", bbox_inches="tight")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(results_dir / "pec50_distribution.png", bbox_inches="tight")
     plt.close(fig)
 
     # Split: 80% pool, 20% test. Per-iteration calibration is handled
@@ -197,10 +202,14 @@ def run_setup(cfg: ALConfig, split_type: str) -> dict:
     }
 
 
-def load_or_run_setup(split_type: str, config_path: str = "config.yaml") -> dict:
+def load_or_run_setup(
+    split_type: str,
+    config_path: str = "config.yaml",
+    results_dir: Path = Path("results"),
+) -> dict:
     """Load the setup checkpoint for ``split_type``, computing it if absent.
 
-    If ``results/setup_<split_type>.pkl`` exists it is loaded and returned
+    If ``<results_dir>/setup_<split_type>.pkl`` exists it is loaded and returned
     directly, allowing HPC worker jobs to skip the expensive setup phase.
     Otherwise ``run_setup`` is called and the result is pickled.
 
@@ -210,6 +219,9 @@ def load_or_run_setup(split_type: str, config_path: str = "config.yaml") -> dict
         One of ``"scaffold"``, ``"random"``, or ``"cluster"``.
     config_path : str, optional
         Path to the YAML config file, used only when setup must be computed.
+    results_dir : Path, optional
+        Directory where setup pickles are read from / written to.
+        Default is ``Path("results")``.
 
     Returns
     -------
@@ -217,14 +229,14 @@ def load_or_run_setup(split_type: str, config_path: str = "config.yaml") -> dict
         Setup checkpoint — same structure as the return value of ``run_setup()``.
 
     """
-    setup_pkl = Path(f"results/setup_{split_type}.pkl")
+    setup_pkl = results_dir / f"setup_{split_type}.pkl"
     if setup_pkl.exists():
         print(f"Loading shared setup from {setup_pkl}...")
         with open(setup_pkl, "rb") as fh:
             return pickle.load(fh)
     print(f"No {setup_pkl} found — running setup now...")
     cfg = load_config(config_path)
-    setup = run_setup(cfg, split_type)
+    setup = run_setup(cfg, split_type, results_dir=results_dir)
     with open(setup_pkl, "wb") as fh:
         pickle.dump(setup, fh, protocol=pickle.HIGHEST_PROTOCOL)
     print(f"Setup saved to {setup_pkl}.")
@@ -234,12 +246,18 @@ def load_or_run_setup(split_type: str, config_path: str = "config.yaml") -> dict
 # ── Per-job AL run ─────────────────────────────────────────────────────────────
 
 
-def run_job(strategy: str, seed: int, split_type: str, setup: dict) -> None:
+def run_job(
+    strategy: str,
+    seed: int,
+    split_type: str,
+    setup: dict,
+    results_dir: Path = Path("results"),
+) -> None:
     """Run one (split_type, strategy, seed) triple and write its result to disk.
 
     Skips the job silently if the output file already exists, making it safe
     to dispatch the same job multiple times (idempotent). On success, writes
-    ``results/run_<split_type>_<strategy>_seed<seed>.pkl``.
+    ``<results_dir>/run_<split_type>_<strategy>_seed<seed>.pkl``.
 
     Parameters
     ----------
@@ -251,10 +269,13 @@ def run_job(strategy: str, seed: int, split_type: str, setup: dict) -> None:
         Dataset split type used for this job (``"scaffold"``, ``"random"``, or ``"cluster"``).
     setup : dict
         Shared setup checkpoint as returned by ``load_or_run_setup()``.
+    results_dir : Path, optional
+        Directory where result pickles are written.
+        Default is ``Path("results")``.
 
     """
     cfg: ALConfig = setup["config"]
-    out_path = Path(f"results/run_{split_type}_{strategy}_seed{seed}.pkl")
+    out_path = results_dir / f"run_{split_type}_{strategy}_seed{seed}.pkl"
     if out_path.exists():
         print(f"Skipping {split_type}/{strategy!r} seed={seed} (already exists: {out_path}).")
         return
@@ -348,16 +369,24 @@ def main() -> None:
         default=None,
         help="Random seed to use. Omit to run all seeds defined in config.",
     )
+    parser.add_argument(
+        "--results-dir",
+        default="results",
+        metavar="DIR",
+        help="Directory for reading/writing setup and run pickles, and output plots. "
+        "Default: results",
+    )
     args = parser.parse_args()
 
-    Path("results").mkdir(exist_ok=True)
+    results_dir = Path(args.results_dir)
+    results_dir.mkdir(parents=True, exist_ok=True)
     cfg = load_config(args.config)
 
     # ── Mode 1: setup only ─────────────────────────────────────────────────────
     if args.setup_only:
         for split_type in cfg.split_types:
-            setup = run_setup(cfg, split_type)
-            pkl_path = Path(f"results/setup_{split_type}.pkl")
+            setup = run_setup(cfg, split_type, results_dir=results_dir)
+            pkl_path = results_dir / f"setup_{split_type}.pkl"
             with open(pkl_path, "wb") as fh:
                 pickle.dump(setup, fh, protocol=pickle.HIGHEST_PROTOCOL)
             print(f"Setup saved to {pkl_path}.")
@@ -387,10 +416,10 @@ def main() -> None:
 
     # ── Run jobs ───────────────────────────────────────────────────────────────
     for split_type in split_types_to_run:
-        setup = load_or_run_setup(split_type, args.config)
+        setup = load_or_run_setup(split_type, args.config, results_dir=results_dir)
         for strategy in strategies_to_run:
             for seed in seeds_to_run:
-                run_job(strategy, seed, split_type, setup)
+                run_job(strategy, seed, split_type, setup, results_dir=results_dir)
 
     print("\nAll jobs complete.")
 
