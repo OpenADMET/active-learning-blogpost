@@ -22,11 +22,12 @@ active_learning:
     - Exploration
     - Diversity
 
-  # Split types to run. Valid options: scaffold, random
+  # Split types to run. Valid options: scaffold, random, cluster
   # Each produces a separate setup_<split_type>.pkl and run_<split_type>_*.pkl set.
   split_types:
     - scaffold
     # - random
+    # - cluster
 
   # Outer seeds used to generate error bands on learning curves.
   # Each (strategy, seed) pair becomes one HPC job.
@@ -41,3 +42,12 @@ training:
   n_models: 5      # Committee size (number of bootstrapped ensemble members)
   max_epochs: 20   # Maximum training epochs per committee member
   use_chemeleon: true  # Whether to initialise each committee member from CheMeleon pretrained weights
+
+clustering:
+  # Parameters used when split_types includes "cluster".
+  # method: butina | kmeans | bemis-murcko
+  method: butina
+  # k_clusters: number of clusters for the kmeans method (ignored by butina/bemis-murcko)
+  k_clusters: 10
+  # butina_cutoff: Tanimoto distance threshold for Butina clustering (ignored by kmeans)
+  butina_cutoff: 0.65
