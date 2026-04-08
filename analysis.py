@@ -538,9 +538,10 @@ def _save_multisplit(
 ) -> None:
     """Combine split-type figures and write HTML + queue SVG export.
 
-    When both ``"scaffold"`` and ``"random"`` keys are present in *figs*, the
-    two figures are merged into a two-panel side-by-side layout. Otherwise the
-    single available figure is used as-is.
+    When two or more keys are present in *figs*, the first two figures are
+    merged into a two-panel side-by-side layout with panel titles derived from
+    the split type names (e.g. ``"scaffold"`` → ``"Scaffold Split"``).
+    If only one figure is present it is used as-is.
 
     Parameters
     ----------
@@ -558,9 +559,16 @@ def _save_multisplit(
     ylim : tuple[float, float] or None, optional
         If provided, sets the y-axis range on the output figure.
     """
-    if "scaffold" in figs and "random" in figs:
-        out = _combine_figures_side_by_side(figs["scaffold"], figs["random"])
-    elif figs:
+    split_keys = list(figs.keys())
+    if len(split_keys) >= 2:
+        left_key, right_key = split_keys[0], split_keys[1]
+        out = _combine_figures_side_by_side(
+            figs[left_key],
+            figs[right_key],
+            title_left=f"{left_key.capitalize()} Split",
+            title_right=f"{right_key.capitalize()} Split",
+        )
+    elif split_keys:
         out = next(iter(figs.values()))
     else:
         return
@@ -602,7 +610,7 @@ def generate_learning_curve_mae(
     """
     print("Generating learning curve (MAE)...")
     figs: dict[str, go.Figure] = {}
-    for sp in ["scaffold", "random"]:
+    for sp in per_split_data:
         if sp not in per_split_data:
             continue
         figs[sp] = alp.plot_learning_curve_with_bands(
@@ -647,7 +655,7 @@ def generate_learning_curve_ktau(
     """
     print("Generating learning curve (Kendall's τ)...")
     figs: dict[str, go.Figure] = {}
-    for sp in ["scaffold", "random"]:
+    for sp in per_split_data:
         if sp not in per_split_data:
             continue
         figs[sp] = alp.plot_learning_curve_with_bands(
@@ -695,7 +703,7 @@ def generate_hit_discovery_curve(
     """
     print("Generating hit discovery curve...")
     figs: dict[str, go.Figure] = {}
-    for sp in ["scaffold", "random"]:
+    for sp in per_split_data:
         if sp not in per_split_data:
             continue
         max_hits_sp = int(
@@ -744,7 +752,7 @@ def generate_calibration_area_per_iteration(
     """
     print("Generating calibration area per iteration plot...")
     figs: dict[str, go.Figure] = {}
-    for sp in ["scaffold", "random"]:
+    for sp in per_split_data:
         if sp not in per_split_data:
             continue
         figs[sp] = alp.plot_calibration_area_per_iteration(
@@ -792,7 +800,7 @@ def generate_sigma_error_correlation(
     """
     print("Generating sigma–error correlation plot...")
     figs: dict[str, go.Figure] = {}
-    for sp in ["scaffold", "random"]:
+    for sp in per_split_data:
         if sp not in per_split_data:
             continue
         figs[sp] = alp.plot_sigma_error_correlation(
@@ -871,15 +879,16 @@ def generate_gtm_figures(
     results_dir: str | Path,
     *,
     method: str = "Exploitation",
+    split_suffix: str = "",
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
     """Generate GTM selection figures: animated Plotly HTML and static SVG.
 
     Writes an interactive animated Plotly figure to
-    ``gtm_selection_animation_<method_lower>.html`` and a static matplotlib
-    snapshot (compounds coloured by AL iteration) to the corresponding ``.svg``
-    file.
+    ``gtm_selection_animation_<method_lower><split_suffix>.html`` and a static
+    matplotlib snapshot (compounds coloured by AL iteration) to the
+    corresponding ``.svg`` file.
 
     The animated HTML is not queued for Kaleido SVG export because animated
     frames collapse to an empty first frame; the static matplotlib SVG serves
@@ -896,6 +905,9 @@ def generate_gtm_figures(
     method : str, optional
         Strategy name whose run history is visualised. Default
         ``"Exploitation"``.
+    split_suffix : str, optional
+        String appended to output filenames before the extension, e.g.
+        ``"_scaffold"``. Default is ``""`` (no suffix).
     xlim : tuple[float, float] or None, optional
         X-axis range override. Applied to both the Plotly figure and the
         matplotlib axes.
@@ -914,7 +926,9 @@ def generate_gtm_figures(
         fig.update_xaxes(range=list(xlim))
     if ylim is not None:
         fig.update_yaxes(range=list(ylim))
-    fig.write_html(f"{results_dir}/gtm_selection_animation_{method.lower()}.html")
+    fig.write_html(
+        f"{results_dir}/gtm_selection_animation_{method.lower()}{split_suffix}.html"
+    )
 
     # Static matplotlib snapshot: compounds coloured by first-acquired iteration
     print(f"Generating static GTM snapshot ({method})...")
@@ -969,7 +983,7 @@ def generate_gtm_figures(
         sm, cax=gtm_cax, label="AL Iteration"
     ).ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     fig_static.savefig(
-        f"{results_dir}/gtm_selection_animation_{method.lower()}.svg",
+        f"{results_dir}/gtm_selection_animation_{method.lower()}{split_suffix}.svg",
         dpi=150,
         bbox_inches="tight",
     )
@@ -1006,14 +1020,16 @@ def generate_tmap_figures(
     results_dir: str | Path,
     *,
     strategy: str = "Exploitation",
+    split_suffix: str = "",
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
     """Generate TMAP visualizations: interactive Faerun HTML and static SVG.
 
-    Writes an interactive Faerun scatter to ``tmap_selection.html`` and a
-    static matplotlib snapshot (compounds coloured by AL iteration) to
-    ``tmap_selection.svg``.
+    Writes an interactive Faerun scatter to
+    ``tmap_selection<split_suffix>.html`` and a static matplotlib snapshot
+    (compounds coloured by AL iteration) to
+    ``tmap_selection<split_suffix>.svg``.
 
     Parameters
     ----------
@@ -1029,6 +1045,9 @@ def generate_tmap_figures(
     strategy : str, optional
         Strategy name whose run history is visualised. Default
         ``"Exploitation"``.
+    split_suffix : str, optional
+        String appended to output filenames before the extension, e.g.
+        ``"_scaffold"``. Default is ``""`` (no suffix).
     xlim : tuple[float, float] or None, optional
         X-axis range override for the static matplotlib snapshot.
     ylim : tuple[float, float] or None, optional
@@ -1042,7 +1061,7 @@ def generate_tmap_figures(
         point_scale=3,
         background_point_scale=1,
         title="Active Learning Selection (TMAP)",
-        output_name="tmap_selection",
+        output_name=f"tmap_selection{split_suffix}",
         output_path=f"{results_dir}/",
     )
 
@@ -1095,7 +1114,9 @@ def generate_tmap_figures(
     fig_static.colorbar(
         tsm, cax=tmap_cax, label=f"AL Iteration ({strategy})"
     ).ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-    fig_static.savefig(f"{results_dir}/tmap_selection.svg", bbox_inches="tight")
+    fig_static.savefig(
+        f"{results_dir}/tmap_selection{split_suffix}.svg", bbox_inches="tight"
+    )
     plt.close(fig_static)
 
 
@@ -1136,14 +1157,16 @@ def generate_tmap_partition_figures(
     tmap_layout: tuple,
     results_dir: str | Path,
     *,
+    split_suffix: str = "",
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
     """Generate train/test partition TMAP visualizations: Faerun HTML and static SVG.
 
-    Writes an interactive Faerun scatter to ``tmap_partition.html`` (pool
-    compounds colored as Train, test compounds as Test) and a static matplotlib
-    snapshot to ``tmap_partition.svg``.
+    Writes an interactive Faerun scatter to
+    ``tmap_partition<split_suffix>.html`` (pool compounds colored as Train,
+    test compounds as Test) and a static matplotlib snapshot to
+    ``tmap_partition<split_suffix>.svg``.
 
     Parameters
     ----------
@@ -1157,6 +1180,9 @@ def generate_tmap_partition_figures(
         that order.
     results_dir : str or Path
         Directory to write output files.
+    split_suffix : str, optional
+        String appended to output filenames before the extension, e.g.
+        ``"_scaffold"``. Default is ``""`` (no suffix).
     xlim : tuple[float, float] or None, optional
         X-axis range override for the static matplotlib snapshot.
     ylim : tuple[float, float] or None, optional
@@ -1175,19 +1201,17 @@ def generate_tmap_partition_figures(
         smiles_list=all_smiles,
         partition_labels=partition_labels,
         title="Train / Test Partition (TMAP)",
-        output_name="tmap_partition",
+        output_name=f"tmap_partition{split_suffix}",
         output_path=f"{results_dir}/",
     )
 
     # Static matplotlib snapshot: pool=blue, test=orange
     print("Generating static TMAP partition snapshot...")
     tx, ty, ts, tt = tmap_layout
-    train_color = (0.122, 0.467, 0.706, 0.6)   # tab10 blue
-    test_color = (1.0, 0.498, 0.055, 0.9)       # tab10 orange
+    train_color = (0.122, 0.467, 0.706, 0.6)  # tab10 blue
+    test_color = (1.0, 0.498, 0.055, 0.9)  # tab10 orange
 
-    point_colors = [
-        train_color if lbl == 0 else test_color for lbl in partition_labels
-    ]
+    point_colors = [train_color if lbl == 0 else test_color for lbl in partition_labels]
 
     fig_static, ax = plt.subplots(figsize=(8.5, 8.5))
     for si, ti in zip(ts, tt):
@@ -1210,18 +1234,28 @@ def generate_tmap_partition_figures(
 
     legend_handles = [
         plt.Line2D(
-            [0], [0],
-            marker="o", color="w", markerfacecolor=train_color[:3], markersize=6,
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor=train_color[:3],
+            markersize=6,
             label="Train",
         ),
         plt.Line2D(
-            [0], [0],
-            marker="o", color="w", markerfacecolor=test_color[:3], markersize=6,
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor=test_color[:3],
+            markersize=6,
             label="Test",
         ),
     ]
     ax.legend(handles=legend_handles, loc="lower right", frameon=False, fontsize=9)
-    fig_static.savefig(f"{results_dir}/tmap_partition.svg", bbox_inches="tight")
+    fig_static.savefig(
+        f"{results_dir}/tmap_partition{split_suffix}.svg", bbox_inches="tight"
+    )
     plt.close(fig_static)
 
 
@@ -1286,13 +1320,9 @@ def main() -> None:
     run_sanity_checks(setups, job_results, cfg)
     per_split_data = build_split_data(setups, job_results, cfg)
 
-    _primary = (
-        "scaffold" if "scaffold" in per_split_data else next(iter(per_split_data))
-    )
-    all_runs = per_split_data[_primary]["all_runs"]
-    df_pool = per_split_data[_primary]["df_pool"]
-    df_test = per_split_data[_primary]["df_test"]
-    gtm_coords_pool = per_split_data[_primary]["gtm_coords_pool"]
+    _primary = "cluster" if "cluster" in per_split_data else next(iter(per_split_data))
+    all_runs_primary = per_split_data[_primary]["all_runs"]
+    df_test_primary = per_split_data[_primary]["df_test"]
 
     Path(results_dir).mkdir(parents=True, exist_ok=True)
     svg_queue: list[tuple] = []
@@ -1312,12 +1342,28 @@ def main() -> None:
     generate_sigma_error_correlation(
         per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.25)
     )
-    generate_calibration_curve(all_runs, df_test, results_dir, svg_queue)
-    generate_gtm_figures(all_runs, gtm_coords_pool, results_dir)
-    tmap_layout = compute_tmap_layout(df_pool)
-    generate_tmap_figures(df_pool, all_runs, tmap_layout, results_dir)
-    tmap_partition_layout = compute_tmap_partition_layout(df_pool, df_test)
-    generate_tmap_partition_figures(df_pool, df_test, tmap_partition_layout, results_dir)
+    generate_calibration_curve(
+        all_runs_primary, df_test_primary, results_dir, svg_queue
+    )
+
+    for split_type, split_data in per_split_data.items():
+        suffix = f"_{split_type}"
+        all_runs = split_data["all_runs"]
+        df_pool = split_data["df_pool"]
+        df_test = split_data["df_test"]
+        gtm_coords_pool = split_data["gtm_coords_pool"]
+
+        generate_gtm_figures(
+            all_runs, gtm_coords_pool, results_dir, split_suffix=suffix
+        )
+        tmap_layout = compute_tmap_layout(df_pool)
+        generate_tmap_figures(
+            df_pool, all_runs, tmap_layout, results_dir, split_suffix=suffix
+        )
+        tmap_partition_layout = compute_tmap_partition_layout(df_pool, df_test)
+        generate_tmap_partition_figures(
+            df_pool, df_test, tmap_partition_layout, results_dir, split_suffix=suffix
+        )
 
     export_plotly_svgs(svg_queue)
 
