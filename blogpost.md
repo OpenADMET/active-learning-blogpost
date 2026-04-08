@@ -12,39 +12,41 @@ PXR is a ligand-activated nuclear transcription factor that functions as the bod
 
 ## The label bottleneck in drug discovery
 
-For lead optimization, we typically work with only hundreds to low thousands of compounds. A model trained on 100 diverse, informative compounds will outperform one trained on 100 redundant analogues, so the choice of training points matters immensely. Active learning formalizes this intuition. We start with ~600 external ChEMBL PXR measurements as a seed prior, then use the committee's consensus (mean) and disagreement (standard deviation) to query a large, unlabeled pool. This approach is called [**query-by-committee (QBC)**](https://dl.acm.org/doi/10.1145/130385.130417).
+In lead optimization, we typically work with hundreds to a few thousand compounds — a small fraction of the chemical space that could be explored. Assaying every candidate is expensive and slow, so *which* compounds we choose to test matters enormously: the composition of the training set shapes both what the model learns and where it generalizes.
 
-We combine QBC with [**CheMeleon**](https://github.com/JacksonBurns/chemeleon), a graph neural network pretrained on millions of molecules, providing robust representations even when task-specific labels are scarce.
+Active learning formalizes this intuition. Rather than selecting compounds at random, the model identifies which untested candidates would be most informative to measure next. Our **goal** is to build an accurate PXR activity model while minimizing the number of assays required — finding the most potent compounds and learning the structure-activity landscape as efficiently as possible.
 
-## Configuration
+What we are **querying** is a large pool of unlabeled PXR candidate compounds. Their true activity values are hidden from the model; they are revealed only when a compound is nominated for assay, exactly as in a real experimental campaign. We also begin with a foundation of existing PXR measurements from external sources, giving the model a starting foothold before the pool is touched.
 
-To reproduce the results in this post, install `openadmet-models` by following the [installation instructions](https://docs.openadmet.org/en/latest/installation.html), then run:
+**How** the model decides what to query next is the central question of this post. At each iteration, some acquisition strategy scores every unlabeled candidate and selects a batch to assay. We compare six such strategies — ranging from pure exploitation of the model's predictions to pure exploration of uncertain or structurally novel regions — to understand the tradeoffs between finding actives quickly and learning a broadly accurate model.
 
-```bash
-# Execute the active learning pipeline (~several GPU-hours)
-python run.py   
+## Practical considerations
 
-# Generate all figures from results/all_runs.pkl
-python analysis.py  
-```
+Our benchmark is designed around an as-realistic-as-possible scenario: you have a folder of legacy assay data from the public domain or a related project, a plate of untested candidate compounds, and a busy lab with queues, staff, and resource requirements. The choices below are a best-effort attempt to weight these practical considerations.
 
-All supporting code lives in `src/`: [src/helpers.py](src/helpers.py) contains the core AL utilities and [src/plots.py](src/plots.py) contains all Plotly/Faerun plotting functions. The campaign is governed by parameters specified in [`config.yaml`](config.yaml).
+### Cold-starting with a foundation model and historical data
 
-The `n_start: 0` setting means the committee is pretrained on ~600 external ChEMBL PXR measurements (`seed_data_path`) rather than pool compounds. These seed labels are always included in training but never queried or evaluated, reflecting a realistic scenario where historical assay data is available but the prospective pool is untouched.
+The earliest iterations of an active learning campaign are the most precarious. With only a handful of labeled compounds, a model trained from scratch has limited reliable signal. Its predictions are essentially noise, and any acquisition strategy built on those predictions is resultingly noisy.
 
-A `query_size` of 100 matches experimental throughput. A standard 1536-well microplate accommodates roughly 100 compounds at ~13-point dose-response curves, giving one full plate per AL iteration.
+We address this in two ways. First, rather than initializing the committee with random weights, we use [**CheMeleon**](https://github.com/JacksonBurns/chemeleon), a graph neural network pretrained on millions of molecules. Pretraining instills broadly useful molecular representations that transfer well to novel tasks, giving the model a usable prior before any target-specific data arrives. Second, we seed training with publically available measurements from [ChEMBL](https://www.ebi.ac.uk/chembl/) (~600 entries). This mirrors the real-world scenario in which a practitioner begins a new project, wielding what's practically available and useful against plates of untested compounds.
 
-We compare six acquisition strategies (**EI**, **UCB**, **Random**, **Exploitation**, **Exploration**, and **Diversity**) under both random and scaffold train/test splits.
+### Evaluating generalization
 
-## Splitting the data: random and scaffold
+To measure how well the model performs, we hold out a fixed test set before the campaign begins and never touch it during acquisition. But the choice of how to construct that test set assesses different real-world scenarios.
 
-We simulate an active learning campaign using real experimental data, treating labels as unknown and revealing them only when a compound is queried. The campaign dataset is loaded from `data/challenge_train.csv`, and ChEMBL pretraining data from `data/chembl.csv`. Overlapping compounds are dropped to ensure zero leakage.
+A **random split** is optimistic: structurally similar molecules can appear in both training and test sets, allowing a model to memorize a series rather than learn the underlying [structure-activity relationship (SAR)](https://en.wikipedia.org/wiki/Structure%E2%80%93activity_relationship). We include it as an upper-bound baseline.
 
-Random splitting is overly optimistic in drug discovery because structurally similar molecules can appear in both train and test sets, allowing a model to memorize the series rather than learn the [structure-activity relationship (SAR)](https://en.wikipedia.org/wiki/Structure%E2%80%93activity_relationship). We include it as an upper bound.
+A **scaffold split** based on [Bemis-Murcko scaffolds](https://practicalcheminformatics.blogspot.com/2021/10/exploratory-data-analysis-with.html) is more demanding: it forces the test set to contain chemical series not seen during training, better representing the challenge of predicting activity for genuinely new chemical matter. 
 
-We also perform a **scaffold split** based on [Bemis-Murcko scaffolds](https://practicalcheminformatics.blogspot.com/2021/10/exploratory-data-analysis-with.html), which forces generalization to new chemical series and better mimics a prospective lead optimization scenario. Both test sets are fixed for the entire active learning loop, ensuring an apples-to-apples comparison across all iterations.
+> **Cluster** and **time split** data represent more challenging and more realistic configurations, but admittedly scaffold split is easier to implement, and our data does not have meaningful temporal signal.
 
-In both split methods, the 80% training split becomes the **candidate pool** for the active learner, and the 20% test split is the fixed evaluation benchmark.
+Together, these two splits bracket the likely real-world performance range. The 80% training split becomes the candidate pool for the active learner; the 20% test split is the fixed evaluation benchmark used throughout all iterations.
+
+### Query batch size: matching the lab
+
+Many academic demonstrations of active learning query one compound at a time — or at most batches of 10 or 20. This is computationally convenient but experimentally unrealistic. In practice, dose-response assays are run on plates: a standard 1536-well microplate at roughly 13-point dose-response accommodates approximately 100 compounds per run (we'll leave some room for QC and controls). Querying fewer than a plate's worth of compounds per iteration would leave plates partially filled, reducing throughput and complicating scheduling.
+
+We therefore query 100 compounds per iteration — one full plate's equivalent. Even this is conservative: most labs would prefer to fill multiple plates between model retraining cycles, particularly early in a campaign when assay infrastructure is under-utilized. The gap between the batch sizes used in AL benchmarks and what labs would actually run is worth acknowledging; results from single-compound or tiny-batch settings may not transfer directly to experimental practice.
 
 ## GTM chemical space embedding
 
@@ -179,4 +181,17 @@ The σ-error correlation results tell a more structured story. The ordering (**E
 5. **Uncertainty quality depends on training concentration, not uncertainty-guided sampling.** Absolute calibration on novel test scaffolds fails for all strategies. But σ-error correlation follows a clear gradient (**Exploitation** ρ ≈ 0.30, **UCB** ~0.21, remaining strategies ~0.17), tracking exploitation intensity precisely. An exploitation-heavy campaign may paradoxically yield better-ranked uncertainty estimates than one guided explicitly by σ.
 6. **Recommendation.** For early-stage hit-finding, use **Exploitation** or **UCB**. For a generalizable SAR model, all strategies perform equivalently and **Random** is a perfectly defensible baseline. Use **Diversity** only when structural coverage is the explicit goal.
 
-Check out the [`openadmet-models`](https://github.com/OpenADMET/openadmet-models) repository for the full code.
+
+## Reproducibility
+
+To reproduce the results in this post, install `openadmet-models` by following the [installation instructions](https://docs.openadmet.org/en/latest/installation.html), then run:
+
+```bash
+# Execute the active learning pipeline (~several GPU-hours)
+python run.py   
+
+# Generate all figures from results/all_runs.pkl
+python analysis.py  
+```
+
+All supporting code lives in `src/`: [src/helpers.py](src/helpers.py) contains the core AL utilities and [src/plots.py](src/plots.py) contains all Plotly/Faerun plotting functions. The campaign is governed by parameters specified in [`config.yaml`](config.yaml).
