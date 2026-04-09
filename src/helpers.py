@@ -25,6 +25,7 @@ from openadmet.models.eval.uncertainty import UncertaintyMetrics
 from openadmet.models.features.chemprop import ChemPropFeaturizer
 from openadmet.models.trainer.lightning import LightningTrainer
 from rdkit import Chem
+from rdkit.Chem import rdFingerprintGenerator
 from scipy.spatial.distance import cdist
 
 # Ordered list of all valid acquisition strategy names
@@ -150,8 +151,9 @@ def smiles_to_gtm(
 
 def smiles_to_tmap(
     smiles_list: list[str],
-    fp_size: int = 2048,
-    fp_radius: int = 3,
+    fp_type: str = "morgan",
+    fp_size: int = 1024,
+    fp_radius: int = 2,
     lsh_dim: int = 128,
     k: int = 50,
     sl_repeats: int = 2,
@@ -160,23 +162,52 @@ def smiles_to_tmap(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute a TMAP layout for a list of SMILES strings.
 
-    Encodes each molecule as an MHFP fingerprint, indexes all fingerprints
-    into an LSH forest, and runs ``tm.layout_from_lsh_forest`` to produce 2D
-    node coordinates and minimum-spanning-tree edges.
+    Encodes each molecule as a fingerprint, hashes all fingerprints into an
+    LSH forest, and runs ``tm.layout_from_lsh_forest`` to produce 2D node
+    coordinates and minimum-spanning-tree edges.
+
+    Two fingerprint backends are supported via ``fp_type``.  ``fp_size`` and
+    ``fp_radius`` have the same names for both but control slightly different
+    quantities depending on the backend:
+
+    .. list-table:: Parameter semantics by ``fp_type``
+       :header-rows: 1
+
+       * - Parameter
+         - ``"morgan"``
+         - ``"mhfp"``
+       * - ``fp_size``
+         - Morgan bit-vector length (``fpSize`` in
+           ``rdFingerprintGenerator.GetMorganGenerator``); also the number of
+           MinHash permutations passed to ``tm.Minhash(d=fp_size)`` and the
+           first dimension of ``tm.LSHForest(fp_size, lsh_dim)``.
+         - MHFP hash-vector length (``n_permutations`` in
+           ``MHFPEncoder(fp_size, fp_radius)``); also the first dimension of
+           ``tm.LSHForest(fp_size, lsh_dim)``.  Recommend 2048 for MHFP.
+       * - ``fp_radius``
+         - Morgan radius (number of bond hops). Default 2.
+         - MHFP encoding radius (circular substructure depth). Default 3 for
+           MHFP; the shared default of 2 is fine for either type.
 
     Parameters
     ----------
     smiles_list : list[str]
         SMILES of compounds in the pool, in the same row order expected by
         downstream consumers.
+    fp_type : str
+        Fingerprint backend.  ``"morgan"`` (default) uses RDKit Morgan
+        fingerprints consistent with the Taylor-Butina clustering in
+        ``ClusterSplitter``.  ``"mhfp"`` uses the MHFP MinHash encoder
+        (requires the ``mhfp`` package).
     fp_size : int
-        MHFP fingerprint size (number of bits). Default 2048.
+        Fingerprint / MinHash vector length.  Default 1024 (optimised for
+        ``"morgan"``; increase to 2048 when using ``"mhfp"``).
     fp_radius : int
-        MHFP encoding radius. Default 3.
+        Encoding radius.  Default 2.
     lsh_dim : int
-        Number of LSH permutations. Default 128.
+        Number of LSH prefix trees.  Default 128.
     k : int
-        Number of nearest neighbours used by the TMAP layout. Default 50.
+        Number of nearest neighbours used by the TMAP layout.  Default 50.
     sl_repeats, mmm_repeats : int
         Layout refinement repetitions passed to ``tm.LayoutConfiguration``.
     node_size : int
@@ -189,26 +220,43 @@ def smiles_to_tmap(
         source indices, and edge target indices, all as numpy arrays of length
         n_compounds (for x/y) or n_edges (for s/t).
 
+    Raises
+    ------
+    ValueError
+        If ``fp_type`` is not ``"morgan"`` or ``"mhfp"``.
+
     """
     import tmap as tm  # Deferred — not available on all platforms
-    from mhfp.encoder import MHFPEncoder  # Deferred — depends on tmap
 
-    enc = MHFPEncoder(fp_size, fp_radius)
-    # NumPy 2.0+ raises OverflowError when the Mersenne prime (2^61-1) used
-    # in mhfp's hash arithmetic is larger than the uint32 permutation arrays
-    # Casting to uint64 gives enough headroom for the modular arithmetic
-    enc.permutations_a = enc.permutations_a.astype(np.uint64)
-    enc.permutations_b = enc.permutations_b.astype(np.uint64)
+    if fp_type == "morgan":
+        fg = rdFingerprintGenerator.GetMorganGenerator(radius=fp_radius, fpSize=fp_size)
+        enc = tm.Minhash(d=fp_size)
+        bit_matrix = np.zeros((len(smiles_list), fp_size), dtype=np.uint8)
+        for i, smi in enumerate(smiles_list):
+            mol = Chem.MolFromSmiles(smi)
+            if mol is not None:
+                bit_matrix[i] = fg.GetFingerprintAsNumPy(mol)
+        fps = enc.batch_from_binary_array(bit_matrix)
+    elif fp_type == "mhfp":
+        from mhfp.encoder import MHFPEncoder  # Deferred — depends on tmap
+
+        mhfp_enc = MHFPEncoder(fp_size, fp_radius)
+        # NumPy 2.0+ raises OverflowError when the Mersenne prime (2^61-1) used
+        # in mhfp's hash arithmetic is larger than the uint32 permutation arrays.
+        # Casting to uint64 gives enough headroom for the modular arithmetic.
+        mhfp_enc.permutations_a = mhfp_enc.permutations_a.astype(np.uint64)
+        mhfp_enc.permutations_b = mhfp_enc.permutations_b.astype(np.uint64)
+        fps = []
+        for smi in smiles_list:
+            mol = Chem.MolFromSmiles(smi)
+            if mol is not None:
+                fps.append(tm.VectorUint(mhfp_enc.encode_mol(mol, min_radius=0)))
+            else:
+                fps.append(tm.VectorUint([0] * fp_size))
+    else:
+        raise ValueError(f"Unknown fp_type {fp_type!r}. Must be 'morgan' or 'mhfp'.")
+
     lf = tm.LSHForest(fp_size, lsh_dim)
-
-    fps = []
-    for smi in smiles_list:
-        mol = Chem.MolFromSmiles(smi)
-        if mol is not None:
-            fps.append(tm.VectorUint(enc.encode_mol(mol, min_radius=0)))
-        else:
-            fps.append(tm.VectorUint([0] * fp_size))
-
     lf.batch_add(fps)
     lf.index()
 

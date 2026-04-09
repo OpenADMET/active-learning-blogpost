@@ -899,12 +899,21 @@ def plot_tmap_faerun_partition(
     output_path: str = "./",
     title: str = "Train / Test Partition (TMAP)",
     train_color: tuple = (0.122, 0.467, 0.706, 1.0),
-    test_color: tuple = (1.0, 0.498, 0.055, 1.0),
+    test_color: tuple = (0.839, 0.153, 0.157, 1.0),
+    train_singleton_color: tuple = (0.682, 0.780, 0.910, 1.0),
+    test_singleton_color: tuple = (0.984, 0.604, 0.600, 1.0),
     point_scale: float = 3.0,
 ) -> Faerun:
     """Faerun scatter plot of pool and test compounds on a pre-computed TMAP layout.
 
-    Each node is colored by its data partition: ``"Train"`` (pool) or ``"Test"``.
+    Each node is colored by its data partition.  Two or four categories are
+    supported:
+
+    * ``0`` — Train
+    * ``1`` — Test
+    * ``2`` — Train, singleton Bemis-Murcko scaffold (light blue)
+    * ``3`` — Test, singleton Bemis-Murcko scaffold (light red)
+
     SMILES strings are embedded as labels for tooltip display. The TMAP
     minimum-spanning-tree is drawn as a tree layer.
 
@@ -916,8 +925,9 @@ def plot_tmap_faerun_partition(
     smiles_list : list[str]
         SMILES strings in the same row order as ``tmap_layout``.
     partition_labels : np.ndarray
-        Integer array of length ``len(smiles_list)``. ``0`` = Train (pool),
-        ``1`` = Test.
+        Integer array of length ``len(smiles_list)``.  Use values 0/1 for the
+        basic two-category plot, or 0/1/2/3 to additionally distinguish
+        singleton-scaffold compounds.
     output_name : str, optional
         Base filename (without extension) for faerun's HTML output.
     output_path : str, optional
@@ -925,9 +935,15 @@ def plot_tmap_faerun_partition(
     title : str, optional
         Plot title.
     train_color : tuple, optional
-        RGBA color for Train (pool) nodes. Default is matplotlib tab10 blue.
+        RGBA color for Train nodes. Default is matplotlib tab10 blue.
     test_color : tuple, optional
-        RGBA color for Test nodes. Default is matplotlib tab10 orange.
+        RGBA color for Test nodes. Default is matplotlib tab10 red.
+    train_singleton_color : tuple, optional
+        RGBA color for Train nodes with singleton scaffolds. Default is a light
+        blue (``#aec7e8``).
+    test_singleton_color : tuple, optional
+        RGBA color for Test nodes with singleton scaffolds. Default is a light
+        red (``#fb9a99``).
     point_scale : float, optional
         Relative size of scatter points. Default 3.0.
 
@@ -938,8 +954,16 @@ def plot_tmap_faerun_partition(
     """
     x, y, s, t = tmap_layout
 
-    legend_labels = [(0, "Train"), (1, "Test")]
-    listed_cmap = mcolors.ListedColormap([train_color, test_color], N=2)
+    n_cats = int(partition_labels.max()) + 1
+    all_colors = [train_color, test_color, train_singleton_color, test_singleton_color]
+    all_labels = [
+        (0, "Train"),
+        (1, "Test"),
+        (2, "Train (singleton scaffold)"),
+        (3, "Test (singleton scaffold)"),
+    ]
+    legend_labels = all_labels[:n_cats]
+    listed_cmap = mcolors.ListedColormap(all_colors[:n_cats], N=n_cats)
 
     f = Faerun(
         title=title,
