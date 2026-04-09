@@ -4,12 +4,24 @@ data:
   dataset_smiles_col: SMILES
   dataset_activity_col: pEC50
 
+  # Random seed for the pool/test splitter. Ignored for the "predefined" split type.
+  # Default: 42
+  # dataset_split_seed: 42
+
+  # Random seed for the GTM visualization embedding. Does not affect model training.
+  # Default: 1234
+  # gtm_seed: 1234
+
   # Optional external seed training dataset (CSV). Set to null to skip.
   # These compounds are always included in the training set at every AL iteration
   # and are never queried or evaluated.
   seed_data_path: data/chembl.csv
   seed_smiles_col: SMILES
   seed_activity_col: pEC50
+
+  # Column that encodes a predetermined train/test split (values: "train" / "test").
+  # Only used when split_types includes "predefined". Default: "split".
+  # predefined_split_col: split
 
 active_learning:
   # Subset of strategies to run. Valid options:
@@ -22,8 +34,9 @@ active_learning:
     - Exploration
     - Diversity
 
-  # Split types to run. Valid options: scaffold, random, cluster
+  # Split types to run. Valid options: scaffold, random, cluster, predefined
   # Each produces a separate setup_<split_type>.pkl and run_<split_type>_*.pkl set.
+  # Use "predefined" when the dataset has a split column (see predefined_split_col above).
   split_types:
     - scaffold
     # - random

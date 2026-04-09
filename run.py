@@ -25,7 +25,7 @@ Usage
 HPC workflow example (SLURM)
 -----------------------------
     python run.py --setup-only
-    for split in scaffold random cluster; do
+    for split in scaffold random cluster predefined; do
         for strat in EI UCB Random Exploitation Exploration Diversity; do
             for seed in 42 43 44 45 46; do
                 sbatch --job-name=al_${split}_${strat}_${seed} \\
@@ -88,10 +88,14 @@ def run_setup(cfg: ALConfig, split_type: str, results_dir: Path = Path("results"
     cfg : ALConfig
         Validated experiment configuration loaded via ``load_config()``.
     split_type : str
-        One of ``"scaffold"``, ``"random"``, or ``"cluster"``. Controls which
-        splitter is used. For ``"cluster"``, the clustering parameters are taken
-        from ``cfg.cluster_method``, ``cfg.cluster_k_clusters``, and
-        ``cfg.cluster_butina_cutoff``.
+        One of ``"scaffold"``, ``"random"``, ``"cluster"``, or
+        ``"predefined"``. Controls which splitter is used. For
+        ``"cluster"``, the clustering parameters are taken from
+        ``cfg.cluster_method``, ``cfg.cluster_k_clusters``, and
+        ``cfg.cluster_butina_cutoff``. For ``"predefined"``, the dataset
+        must contain a column named ``cfg.predefined_split_col`` (default
+        ``"split"``) with values ``"train"`` and ``"test"``; that column
+        is used directly instead of running a splitter.
     results_dir : Path, optional
         Directory where output files (plots, pickles) are written.
         Default is ``Path("results")``.
@@ -126,31 +130,59 @@ def run_setup(cfg: ALConfig, split_type: str, results_dir: Path = Path("results"
 
     # Split: 80% pool, 20% test. Per-iteration calibration is handled
     # inside run_active_learning by holding out 10% of the current training set.
-    if split_type == "scaffold":
-        splitter = ScaffoldSplitter(
-            train_size=0.8, val_size=0.0, test_size=0.2, random_state=42
-        )
-    elif split_type == "cluster":
-        splitter = ClusterSplitter(
-            train_size=0.8,
-            val_size=0.0,
-            test_size=0.2,
-            random_state=42,
-            method=cfg.cluster_method,
-            k_clusters=cfg.cluster_k_clusters,
-            butina_cutoff=cfg.cluster_butina_cutoff,
-        )
+    if split_type == "predefined":
+        split_col = cfg.predefined_split_col
+        if split_col not in df.columns:
+            raise ValueError(
+                f"split_type='predefined' requires a '{split_col}' column in the dataset, "
+                f"but it was not found. Available columns: {list(df.columns)}"
+            )
+        unexpected = set(df[split_col].dropna().unique()) - {"train", "test"}
+        if unexpected:
+            raise ValueError(
+                f"Column '{split_col}' must contain only 'train' and 'test', "
+                f"but found unexpected values: {sorted(unexpected)}"
+            )
+        print(f"Using predefined split from column '{split_col}'...")
+        _train_mask = df[split_col] == "train"
+        _test_mask = df[split_col] == "test"
+        df_pool = pd.DataFrame(
+            {
+                "smiles": df.loc[_train_mask, cfg.dataset_smiles_col].values,
+                "pEC50": df.loc[_train_mask, cfg.dataset_activity_col].values,
+            }
+        ).reset_index(drop=True)
+        df_test = pd.DataFrame(
+            {
+                "smiles": df.loc[_test_mask, cfg.dataset_smiles_col].values,
+                "pEC50": df.loc[_test_mask, cfg.dataset_activity_col].values,
+            }
+        ).reset_index(drop=True)
     else:
-        splitter = ShuffleSplitter(
-            train_size=0.8, val_size=0.0, test_size=0.2, random_state=42
+        if split_type == "scaffold":
+            splitter = ScaffoldSplitter(
+                train_size=0.8, val_size=0.0, test_size=0.2, random_state=cfg.dataset_split_seed
+            )
+        elif split_type == "cluster":
+            splitter = ClusterSplitter(
+                train_size=0.8,
+                val_size=0.0,
+                test_size=0.2,
+                random_state=cfg.dataset_split_seed,
+                method=cfg.cluster_method,
+                k_clusters=cfg.cluster_k_clusters,
+                butina_cutoff=cfg.cluster_butina_cutoff,
+            )
+        else:
+            splitter = ShuffleSplitter(
+                train_size=0.8, val_size=0.0, test_size=0.2, random_state=cfg.dataset_split_seed
+            )
+        print(f"Splitting data ({split_type})...")
+        X_pool, _, X_test, y_pool, _, y_test, _ = splitter.split(
+            df[cfg.dataset_smiles_col], df[cfg.dataset_activity_col]
         )
-    print(f"Splitting data ({split_type})...")
-    X_pool, _, X_test, y_pool, _, y_test, _ = splitter.split(
-        df[cfg.dataset_smiles_col], df[cfg.dataset_activity_col]
-    )
-
-    df_pool = pd.DataFrame({"smiles": X_pool, "pEC50": y_pool}).reset_index(drop=True)
-    df_test = pd.DataFrame({"smiles": X_test, "pEC50": y_test}).reset_index(drop=True)
+        df_pool = pd.DataFrame({"smiles": X_pool, "pEC50": y_pool}).reset_index(drop=True)
+        df_test = pd.DataFrame({"smiles": X_test, "pEC50": y_test}).reset_index(drop=True)
 
     min_pool_needed = cfg.k_iter * cfg.query_size
     assert len(df_pool) >= min_pool_needed, (
@@ -165,6 +197,7 @@ def run_setup(cfg: ALConfig, split_type: str, results_dir: Path = Path("results"
     print("Fitting GTM on pool molecules...")
     gtm_model, gtm_coords_pool, resps, llhs = smiles_to_gtm(
         list(df_pool["smiles"].values),
+        seed=cfg.gtm_seed,
         device="cpu",
     )
 

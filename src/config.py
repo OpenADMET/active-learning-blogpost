@@ -16,7 +16,7 @@ import yaml
 _VALID_STRATEGIES = ["EI", "UCB", "Random", "Exploitation", "Exploration", "Diversity"]
 
 # Valid split-type options
-_VALID_SPLIT_TYPES = ["scaffold", "random", "cluster"]
+_VALID_SPLIT_TYPES = ["scaffold", "random", "cluster", "predefined"]
 
 
 @dataclass
@@ -31,6 +31,15 @@ class ALConfig:
         Column name for SMILES strings in the main dataset.
     dataset_activity_col : str
         Column name for activity values in the main dataset.
+    dataset_split_seed : int
+        Random seed passed to the splitter (``random_state``) for reproducible
+        pool/test partitioning. Ignored when ``split_type`` is ``"predefined"``.
+        Default is ``42``.
+    gtm_seed : int
+        Random seed for the GTM (Generative Topographic Map) embedding fitted
+        on the pool compounds during setup. Changing this produces a different
+        2D chemical-space layout for visualizations but does not affect model
+        training or evaluation. Default is ``1234``.
     seed_data_path : str or None
         Path to an external seed training dataset (CSV or Parquet), or ``None``
         to skip. These compounds are always in the training set and are never
@@ -44,9 +53,18 @@ class ALConfig:
         ``["EI", "UCB", "Random", "Exploitation", "Exploration", "Diversity"]``.
     split_types : list[str]
         Dataset split methods to run. Must be a non-empty subset of
-        ``["scaffold", "random"]``. Each split type produces its own
-        ``setup_<split_type>.pkl`` and set of run pickles, enabling side-by-side
-        OOD vs. IID comparisons in ``analysis.py``.
+        ``["scaffold", "random", "cluster", "predefined"]``. Each split type
+        produces its own ``setup_<split_type>.pkl`` and set of run pickles,
+        enabling side-by-side OOD vs. IID comparisons in ``analysis.py``.
+        Use ``"predefined"`` when the dataset already contains a ``split``
+        column (or the column named by ``predefined_split_col``) with values
+        ``"train"`` and ``"test"``; the pipeline will honour that assignment
+        instead of re-splitting.
+    predefined_split_col : str
+        Name of the column in the dataset that encodes a predetermined
+        train/test split. Only used when ``"predefined"`` is in
+        ``split_types``. Must contain exactly the values ``"train"`` and
+        ``"test"``. Default is ``"split"``.
     seeds : list[int]
         Outer random seeds that define independent AL runs for error bands.
         Each ``(strategy, seed)`` pair becomes one HPC job.
@@ -83,6 +101,8 @@ class ALConfig:
     dataset_path: str
     dataset_smiles_col: str
     dataset_activity_col: str
+    dataset_split_seed: int
+    gtm_seed: int
     seed_data_path: str | None
     seed_smiles_col: str
     seed_activity_col: str
@@ -98,6 +118,7 @@ class ALConfig:
     cluster_method: str
     cluster_k_clusters: int
     cluster_butina_cutoff: float
+    predefined_split_col: str
 
 
 def load_config(path: str | Path = "config.yaml") -> ALConfig:
@@ -170,6 +191,22 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
             "[data] 'dataset_activity_col' is required and must be a non-empty string"
         )
         dataset_activity_col = ""
+
+    # split seed: optional, defaults to 42 for backward compatibility
+    dataset_split_seed = data.get("dataset_split_seed", 42)
+    if not isinstance(dataset_split_seed, int):
+        errors.append(
+            f"[data] 'dataset_split_seed' must be an integer, got {dataset_split_seed!r}"
+        )
+        dataset_split_seed = 42
+
+    # GTM seed: optional, defaults to 1234 for backward compatibility
+    gtm_seed = data.get("gtm_seed", 1234)
+    if not isinstance(gtm_seed, int):
+        errors.append(
+            f"[data] 'gtm_seed' must be an integer, got {gtm_seed!r}"
+        )
+        gtm_seed = 1234
 
     # seed data (optional)
     seed_data_path = data.get("seed_data_path", None)
@@ -273,6 +310,14 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         )
         n_start = None
 
+    # predefined split column: optional, defaults to "split"
+    predefined_split_col = data.get("predefined_split_col", "split")
+    if not isinstance(predefined_split_col, str) or not predefined_split_col:
+        errors.append(
+            "[data] 'predefined_split_col' must be a non-empty string"
+        )
+        predefined_split_col = "split"
+
     if errors:
         raise ValueError(
             "Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
@@ -289,6 +334,8 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         dataset_path=dataset_path,
         dataset_smiles_col=dataset_smiles_col,
         dataset_activity_col=dataset_activity_col,
+        dataset_split_seed=dataset_split_seed,
+        gtm_seed=gtm_seed,
         seed_data_path=seed_data_path,
         seed_smiles_col=seed_smiles_col,
         seed_activity_col=seed_activity_col,
@@ -304,4 +351,5 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         cluster_method=cluster_method,
         cluster_k_clusters=cluster_k_clusters,
         cluster_butina_cutoff=cluster_butina_cutoff,
+        predefined_split_col=predefined_split_col,
     )
