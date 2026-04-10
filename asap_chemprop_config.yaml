@@ -1,0 +1,69 @@
+# This config is for the ASAP potency dataset
+# Does not use CheMeleon pretrained weights for all committee members
+# Does not use ChEMBL seed data (i.e. starts with an empty training set at AL iteration 0)
+
+data:
+  # Path to the main labelled dataset (CSV or Parquet). Tilde expansion is applied.
+  dataset_path: data/asap_potency.csv
+  dataset_smiles_col: CXSMILES
+  dataset_activity_col: pIC50 (SARS-CoV-2 Mpro)
+
+  # Directory where setup/run pickles and output figures are written and read from.
+  results_path: results/asap_chemprop
+
+  # Random seed for the pool/test splitter. Ignored for the "predefined" split type.
+  dataset_split_seed: 43
+
+  # Random seed for the GTM visualization embedding. Does not affect model training.
+  gtm_seed: 1234
+
+  # Optional external seed training dataset (CSV). Set to null to skip.
+  # These compounds are always included in the training set at every AL iteration
+  # and are never queried or evaluated.
+  seed_data_path: null
+  seed_smiles_col: SMILES
+  seed_activity_col: pEC50
+
+  # Column that encodes a predetermined train/test split (values: "train" / "test").
+  # Only used when split_types includes "predefined". Default: "split".
+  # predefined_split_col: split
+
+active_learning:
+  # Subset of strategies to run. Valid options:
+  # EI, UCB, Random, Exploitation, Exploration, Diversity
+  strategies:
+    - EI
+    - UCB
+    - Random
+    - Exploitation
+    - Exploration
+    - Diversity
+
+  # Split types to run. Valid options: scaffold, random, cluster, predefined
+  # Each produces a separate setup_<split_type>.pkl and run_<split_type>_*.pkl set.
+  # Use "predefined" when the dataset has a split column (see predefined_split_col above).
+  split_types:
+    - random
+
+  # Outer seeds used to generate error bands on learning curves.
+  # Each (strategy, seed) pair becomes one HPC job.
+  seeds: [42, 43, 44, 45, 46]
+
+  # Active learning loop parameters
+  k_iter: 20       # Number of AL iterations per run
+  query_size: 100  # Compounds selected from the pool per iteration
+  n_start: 100     # Initial labeled pool size (set to 0 when using --seed-data)
+
+training:
+  n_models: 5      # Committee size (number of bootstrapped ensemble members)
+  max_epochs: 20   # Maximum training epochs per committee member
+  use_chemeleon: false  # Whether to initialise each committee member from CheMeleon pretrained weights
+
+clustering:
+  # Parameters used when split_types includes "cluster".
+  # method: butina | kmeans | bemis-murcko
+  method: butina
+  # k_clusters: number of clusters for the kmeans method (ignored by butina/bemis-murcko)
+  k_clusters: 10
+  # butina_cutoff: Tanimoto distance threshold for Butina clustering (ignored by kmeans)
+  butina_cutoff: 0.65
