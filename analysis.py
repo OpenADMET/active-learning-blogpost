@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 """Analysis and visualization entry point.
 
-Loads ``results/setup_<split_type>.pkl`` files and all
-``results/run_<split_type>_*.pkl`` files produced by ``run.py``, performs
+Loads ``<results_path>/setup_<split_type>.pkl`` files and all
+``<results_path>/run_<split_type>_*.pkl`` files produced by ``run.py``, performs
 sanity checks on coverage and consistency, then generates all figures
 referenced in ``blogpost.md``.
 
@@ -13,10 +13,12 @@ the scaffold split only (fallback to the first available split type).
 
 Usage
 -----
-    python analysis.py
-    python analysis.py --results-dir /path/to/results
+    python analysis.py --config asap_config.yaml
+    python analysis.py --config pxr_config.yaml
 
-Generated outputs (written to ``results/``)::
+The output directory is read from ``data.results_path`` in the config file.
+
+Generated outputs (written to ``<results_path>/``)::
     learning_curve_mae.html / .svg            — MAE learning curves per strategy
     learning_curve_ktau.html / .svg           — Kendall tau learning curves per strategy
     hit_discovery_curve.html / .svg           — cumulative hits vs. labeled-pool size
@@ -57,7 +59,7 @@ from plotly.subplots import make_subplots  # noqa: E402
 from scipy.stats import spearmanr  # noqa: E402
 
 import src.plots as alp  # noqa: E402
-from src.config import ALConfig  # noqa: E402
+from src.config import ALConfig, load_config  # noqa: E402
 from src.helpers import (  # noqa: E402
     STRATEGY_COLORS,
     smiles_to_tmap,
@@ -1302,11 +1304,11 @@ def main() -> None:
         description="Analysis and visualisation for the active learning pipeline."
     )
     parser.add_argument(
-        "--results-dir",
-        default="results",
-        metavar="DIR",
-        help="Directory containing setup_*.pkl and run_*.pkl files, and where "
-        "output figures are written. Default: results",
+        "--config",
+        default="config.yaml",
+        metavar="PATH",
+        help="Path to the YAML experiment config file. The results directory is "
+        "read from data.results_path in this file. Default: config.yaml",
     )
     parser.add_argument(
         "--hit-threshold",
@@ -1317,10 +1319,10 @@ def main() -> None:
         "hit discovery curve. Default: 6.3",
     )
     args = parser.parse_args()
-    results_dir = args.results_dir
+    cfg = load_config(args.config)
+    results_dir = Path(cfg.results_path).expanduser()
 
     setups = load_setups(results_dir)
-    cfg: ALConfig = next(iter(setups.values()))["config"]
     available_split_types = list(setups.keys())
     print(f"Split types loaded: {available_split_types}")
 
