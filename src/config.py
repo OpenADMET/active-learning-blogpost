@@ -40,6 +40,10 @@ class ALConfig:
         on the pool compounds during setup. Changing this produces a different
         2D chemical-space layout for visualizations but does not affect model
         training or evaluation. Default is ``1234``.
+    results_path : str
+        Directory where setup pickles, run pickles, and output figures are
+        written and read from. Tilde expansion is applied. Default is
+        ``"results"``.
     seed_data_path : str or None
         Path to an external seed training dataset (CSV or Parquet), or ``None``
         to skip. These compounds are always in the training set and are never
@@ -58,13 +62,14 @@ class ALConfig:
         enabling side-by-side OOD vs. IID comparisons in ``analysis.py``.
         Use ``"predefined"`` when the dataset already contains a ``split``
         column (or the column named by ``predefined_split_col``) with values
-        ``"train"`` and ``"test"``; the pipeline will honour that assignment
+        ``"train"``/``"Train"`` and ``"test"``/``"Test"`` (case-insensitive);
+        the pipeline will honour that assignment
         instead of re-splitting.
     predefined_split_col : str
         Name of the column in the dataset that encodes a predetermined
         train/test split. Only used when ``"predefined"`` is in
-        ``split_types``. Must contain exactly the values ``"train"`` and
-        ``"test"``. Default is ``"split"``.
+        ``split_types``. Must contain exactly the values ``"train"``/``"Train"``
+        and ``"test"``/``"Test"`` (case-insensitive). Default is ``"split"``.
     seeds : list[int]
         Outer random seeds that define independent AL runs for error bands.
         Each ``(strategy, seed)`` pair becomes one HPC job.
@@ -103,6 +108,7 @@ class ALConfig:
     dataset_activity_col: str
     dataset_split_seed: int
     gtm_seed: int
+    results_path: str
     seed_data_path: str | None
     seed_smiles_col: str
     seed_activity_col: str
@@ -207,6 +213,12 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
             f"[data] 'gtm_seed' must be an integer, got {gtm_seed!r}"
         )
         gtm_seed = 1234
+
+    # results path: optional, defaults to "results" for backward compatibility
+    results_path = data.get("results_path", "results")
+    if not isinstance(results_path, str) or not results_path:
+        errors.append("[data] 'results_path' must be a non-empty string")
+        results_path = "results"
 
     # seed data (optional)
     seed_data_path = data.get("seed_data_path", None)
@@ -336,6 +348,7 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         dataset_activity_col=dataset_activity_col,
         dataset_split_seed=dataset_split_seed,
         gtm_seed=gtm_seed,
+        results_path=results_path,
         seed_data_path=seed_data_path,
         seed_smiles_col=seed_smiles_col,
         seed_activity_col=seed_activity_col,

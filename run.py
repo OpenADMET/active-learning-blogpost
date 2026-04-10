@@ -36,19 +36,19 @@ HPC workflow example (SLURM)
     done
     python analysis.py
 
-Checkpoint format (results/setup_<split_type>.pkl)
----------------------------------------------------
+Checkpoint format (<results_path>/setup_<split_type>.pkl)
+----------------------------------------------------------
     {
         "split_type", "df_pool", "df_test", "df_seed",
         "gtm_coords_pool", "config",
     }
 
-Per-job format (results/run_<split_type>_<STRATEGY>_seed<N>.pkl)
------------------------------------------------------------------
+Per-job format (<results_path>/run_<split_type>_<STRATEGY>_seed<N>.pkl)
+------------------------------------------------------------------------
     {"split_type": str, "strategy": str, "seed": int, "n_start": int,
      "result": {history, committee}}
 
-Use ``--results-dir`` to write outputs to a custom directory (default: ``results``).
+The output directory is set via ``data.results_path`` in the config file.
 """
 
 import argparse
@@ -94,7 +94,8 @@ def run_setup(cfg: ALConfig, split_type: str, results_dir: Path = Path("results"
         ``cfg.cluster_method``, ``cfg.cluster_k_clusters``, and
         ``cfg.cluster_butina_cutoff``. For ``"predefined"``, the dataset
         must contain a column named ``cfg.predefined_split_col`` (default
-        ``"split"``) with values ``"train"`` and ``"test"``; that column
+        ``"split"``) with values ``"train"``/``"Train"`` and ``"test"``/``"Test"``
+        (case-insensitive); that column
         is used directly instead of running a splitter.
     results_dir : Path, optional
         Directory where output files (plots, pickles) are written.
@@ -137,15 +138,16 @@ def run_setup(cfg: ALConfig, split_type: str, results_dir: Path = Path("results"
                 f"split_type='predefined' requires a '{split_col}' column in the dataset, "
                 f"but it was not found. Available columns: {list(df.columns)}"
             )
-        unexpected = set(df[split_col].dropna().unique()) - {"train", "test"}
+        split_vals = df[split_col].dropna().str.lower()
+        unexpected = set(split_vals.unique()) - {"train", "test"}
         if unexpected:
             raise ValueError(
-                f"Column '{split_col}' must contain only 'train' and 'test', "
+                f"Column '{split_col}' must contain only 'train'/'Train' and 'test'/'Test', "
                 f"but found unexpected values: {sorted(unexpected)}"
             )
         print(f"Using predefined split from column '{split_col}'...")
-        _train_mask = df[split_col] == "train"
-        _test_mask = df[split_col] == "test"
+        _train_mask = df[split_col].str.lower() == "train"
+        _test_mask = df[split_col].str.lower() == "test"
         df_pool = pd.DataFrame(
             {
                 "smiles": df.loc[_train_mask, cfg.dataset_smiles_col].values,
@@ -374,7 +376,7 @@ def main() -> None:
         "--setup-only",
         action="store_true",
         help="Run data loading, splitting, and GTM embedding for all split_types; "
-        "save results/setup_<split_type>.pkl and exit.",
+        "save <results_path>/setup_<split_type>.pkl and exit.",
     )
     parser.add_argument(
         "--config",
@@ -402,18 +404,11 @@ def main() -> None:
         default=None,
         help="Random seed to use. Omit to run all seeds defined in config.",
     )
-    parser.add_argument(
-        "--results-dir",
-        default="results",
-        metavar="DIR",
-        help="Directory for reading/writing setup and run pickles, and output plots. "
-        "Default: results",
-    )
     args = parser.parse_args()
 
-    results_dir = Path(args.results_dir)
-    results_dir.mkdir(parents=True, exist_ok=True)
     cfg = load_config(args.config)
+    results_dir = Path(cfg.results_path).expanduser()
+    results_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Mode 1: setup only ─────────────────────────────────────────────────────
     if args.setup_only:

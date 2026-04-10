@@ -24,9 +24,9 @@ data:
   seed_smiles_col: SMILES
   seed_activity_col: pEC50
 
-  # Column that encodes a predetermined train/test split (values: "train" / "test").
+  # Column that encodes a predetermined train/test split (values: "Train" / "Test").
   # Only used when split_types includes "predefined". Default: "split".
-  # predefined_split_col: split
+  predefined_split_col: Set
 
 active_learning:
   # Subset of strategies to run. Valid options:
@@ -43,7 +43,7 @@ active_learning:
   # Each produces a separate setup_<split_type>.pkl and run_<split_type>_*.pkl set.
   # Use "predefined" when the dataset has a split column (see predefined_split_col above).
   split_types:
-    - random
+    - predefined
 
   # Outer seeds used to generate error bands on learning curves.
   # Each (strategy, seed) pair becomes one HPC job.
