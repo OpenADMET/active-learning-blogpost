@@ -186,10 +186,11 @@ def run_setup(cfg: ALConfig, split_type: str, results_dir: Path = Path("results"
         df_pool = pd.DataFrame({"smiles": X_pool, "pEC50": y_pool}).reset_index(drop=True)
         df_test = pd.DataFrame({"smiles": X_test, "pEC50": y_test}).reset_index(drop=True)
 
-    min_pool_needed = cfg.k_iter * cfg.query_size
+    min_pool_needed = cfg.n_start + cfg.k_iter * cfg.query_size
     assert len(df_pool) >= min_pool_needed, (
-        f"Pool too small: {len(df_pool)} < {min_pool_needed}. "
-        "Increase dataset size or reduce K_ITER/M_QUERY."
+        f"Pool too small: {len(df_pool)} < {min_pool_needed} "
+        f"(n_start={cfg.n_start} + k_iter={cfg.k_iter} × query_size={cfg.query_size}). "
+        "Increase dataset size or reduce k_iter/query_size/n_start."
     )
 
     print(f"Pool size: \t\t{len(df_pool)}")

@@ -17,7 +17,7 @@ done
 
 # Step 2: one job per (config × strategy × seed)
 for cfg in "${CONFIGS[@]}"; do
-    name="${cfg/_config.yaml/}"
+    name=$(basename "${cfg}" _config.yaml)
     for strat in EI UCB Random Exploitation Exploration Diversity; do
         for seed in 42 43 44 45 46; do
             sbatch --job-name=al_${name}_${strat}_${seed} --gres=gpu:1 --partition=gpu --mem=32G --time=8:00:00 --ntasks-per-node=1 \

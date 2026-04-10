@@ -678,7 +678,7 @@ def generate_hit_discovery_curve(
     results_dir: str | Path,
     svg_queue: list[tuple],
     *,
-    hit_threshold: float = 6.3,
+    hit_threshold: float = 7.0,
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
@@ -1313,10 +1313,10 @@ def main() -> None:
     parser.add_argument(
         "--hit-threshold",
         type=float,
-        default=6.3,
+        default=7.0,
         metavar="FLOAT",
         help="pEC50 threshold above which a compound is counted as a hit in the "
-        "hit discovery curve. Default: 6.3",
+        "hit discovery curve. Default: 7.0",
     )
     args = parser.parse_args()
     cfg = load_config(args.config)

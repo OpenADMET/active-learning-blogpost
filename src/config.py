@@ -330,6 +330,14 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         )
         predefined_split_col = "split"
 
+    # cross-field check: n_start=0 requires seed_data_path
+    if n_start == 0 and seed_data_path is None:
+        errors.append(
+            "[active_learning] 'n_start' can only be 0 when 'seed_data_path' is provided "
+            "(the committee needs at least some labeled data at iteration 0); "
+            "set n_start > 0 or provide a seed dataset."
+        )
+
     if errors:
         raise ValueError(
             "Config validation failed:\n" + "\n".join(f"  - {e}" for e in errors)

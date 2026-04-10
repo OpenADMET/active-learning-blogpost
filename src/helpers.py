@@ -408,7 +408,7 @@ def train_committee(
         with tempfile.TemporaryDirectory(prefix="al_logs_") as tmp_dir:
             # Build and seed member first so pl.seed_everything controls dataloader shuffle
             model, trainer = build_committee_member(
-                seed=seed + i, max_epochs=max_epochs, log_dir=tmp_dir, use_chemeleon=use_chemeleon
+                seed=seed * n_models + i, max_epochs=max_epochs, log_dir=tmp_dir, use_chemeleon=use_chemeleon
             )
 
             # Bootstrap resampling
@@ -718,27 +718,31 @@ def run_active_learning(
                 "Either set n_start > 0 or provide df_seed."
             )
 
-        # Build training set: pool-acquired labels + full external seed data
-        if df_seed is not None and len(df_seed) > 0:
-            df_train = pd.concat([df_labeled, df_seed], ignore_index=True)
-        else:
-            df_train = df_labeled
-
         # Calibrating on a small held-out slice ensures the committee's uncertainty
-        # estimates remain honest as the labeled set grows iteration by iteration
-        # Hold out 10% of pool-acquired compounds for per-iteration calibration
+        # estimates remain honest as the labeled set grows iteration by iteration.
+        # Hold out 10% of pool-acquired compounds for per-iteration calibration.
         # Seed data is always kept in the training set (it is never queried and
-        # should be fully exploited). Fall back to sampling from df_train only
-        # when the pool labeled set is too small to spare any compounds
+        # should be fully exploited). Fall back to sampling from the combined
+        # training set when the pool labeled set is too small to spare any.
         _cal_min_pool = 10  # Minimum pool-labeled compounds before we can hold out
         if len(df_labeled) >= _cal_min_pool:
             n_cal = max(1, int(0.1 * len(df_labeled)))
+            # Sample cal from pool-labeled set BEFORE concat with seed data to
+            # avoid index collisions between the two DataFrames (C1 fix)
             df_cal_iter = df_labeled.sample(n=n_cal, random_state=seed + k)
-            # Remove calibration compounds from the full training DataFrame
-            df_train_fit = df_train[~df_train.index.isin(df_cal_iter.index)]
+            df_labeled_fit = df_labeled.drop(df_cal_iter.index)
+            # Build training set: remaining pool compounds + full external seed data
+            if df_seed is not None and len(df_seed) > 0:
+                df_train_fit = pd.concat([df_labeled_fit, df_seed], ignore_index=True)
+            else:
+                df_train_fit = df_labeled_fit
         else:
-            # Not enough pool compounds yet — sample cal from the full training set
-            # as a fallback (includes seed data)
+            # Not enough pool compounds yet — build full training set first, then
+            # sample calibration compounds from it (seed data included as fallback)
+            if df_seed is not None and len(df_seed) > 0:
+                df_train = pd.concat([df_labeled, df_seed], ignore_index=True)
+            else:
+                df_train = df_labeled
             n_cal = max(1, int(0.1 * len(df_train)))
             df_cal_iter = df_train.sample(n=n_cal, random_state=seed + k)
             df_train_fit = df_train.drop(df_cal_iter.index)
