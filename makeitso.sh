@@ -1,15 +1,42 @@
-# Step 1: scaffold split + GTM embedding (fast, single node)
-# python run.py --setup-only
+#!/usr/bin/env bash
+# Step 1: setup (GTM embedding + split) — one per config, run serially before dispatching jobs
+for cfg in pxr_chemeleon_chembl_config.yaml pxr_chemeleon_config.yaml \
+           pxr_chemprop_chembl_config.yaml pxr_chemprop_config.yaml; do
+    python run.py --config "${cfg}" --setup-only
+done
 
-# Step 2: one job per pair
-for strat in EI UCB Random Exploitation Exploration Diversity; do
-    for seed in 42 43 44 45 46; do
-        for split in scaffold random; do
-            sbatch --job-name=al_${split}_${strat}_${seed} --gres=gpu:1 --partition=gpu --mem=32G --time=8:00:00 --ntasks-per-node=1 \
-                   --wrap="python run.py --strategy ${strat} --seed ${seed} --split ${split}"
+for cfg in asap_chemeleon_chembl_config.yaml asap_chemeleon_config.yaml \
+           asap_chemprop_chembl_config.yaml asap_chemprop_config.yaml; do
+    python run.py --config "${cfg}" --setup-only
+done
+
+# Step 2: one job per (config × strategy × seed)
+for cfg in pxr_chemeleon_chembl_config.yaml pxr_chemeleon_config.yaml \
+           pxr_chemprop_chembl_config.yaml pxr_chemprop_config.yaml; do
+    name="${cfg/_config.yaml/}"
+    for strat in EI UCB Random Exploitation Exploration Diversity; do
+        for seed in 42 43 44 45 46; do
+            sbatch --job-name=al_${name}_${strat}_${seed} --gres=gpu:1 --partition=gpu --mem=32G --time=8:00:00 --ntasks-per-node=1 \
+                   --wrap="python run.py --config ${cfg} --strategy ${strat} --seed ${seed}"
+        done
+    done
+done
+
+for cfg in asap_chemeleon_chembl_config.yaml asap_chemeleon_config.yaml \
+           asap_chemprop_chembl_config.yaml asap_chemprop_config.yaml; do
+    name="${cfg/_config.yaml/}"
+    for strat in EI UCB Random Exploitation Exploration Diversity; do
+        for seed in 42 43 44 45 46; do
+            sbatch --job-name=al_${name}_${strat}_${seed} --gres=gpu:1 --partition=gpu --mem=32G --time=8:00:00 --ntasks-per-node=1 \
+                   --wrap="python run.py --config ${cfg} --strategy ${strat} --seed ${seed}"
         done
     done
 done
 
 # Step 3: generate figures (after all jobs finish)
-# python analysis.py
+# for cfg in pxr_chemeleon_chembl_config.yaml pxr_chemeleon_config.yaml \
+#            pxr_chemprop_chembl_config.yaml pxr_chemprop_config.yaml \
+#            asap_chemeleon_chembl_config.yaml asap_chemeleon_config.yaml \
+#            asap_chemprop_chembl_config.yaml asap_chemprop_config.yaml; do
+#     python analysis.py --config "${cfg}"
+# done
