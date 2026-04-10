@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 CONFIGS=(
-    pxr_chemeleon_chembl_config.yaml
-    pxr_chemeleon_config.yaml
-    pxr_chemprop_chembl_config.yaml
-    pxr_chemprop_config.yaml
-    asap_chemeleon_chembl_config.yaml
-    asap_chemeleon_config.yaml
-    asap_chemprop_chembl_config.yaml
-    asap_chemprop_config.yaml
+    config/pxr_chemeleon_chembl_config.yaml
+    config/pxr_chemeleon_config.yaml
+    config/pxr_chemprop_chembl_config.yaml
+    config/pxr_chemprop_config.yaml
+    config/asap_chemeleon_chembl_config.yaml
+    config/asap_chemeleon_config.yaml
+    config/asap_chemprop_chembl_config.yaml
+    config/asap_chemprop_config.yaml
 )
 
 # Step 1: setup (GTM embedding + split) — one per config, run serially before dispatching jobs
