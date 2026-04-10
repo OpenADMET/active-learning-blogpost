@@ -1308,6 +1308,14 @@ def main() -> None:
         help="Directory containing setup_*.pkl and run_*.pkl files, and where "
         "output figures are written. Default: results",
     )
+    parser.add_argument(
+        "--hit-threshold",
+        type=float,
+        default=6.3,
+        metavar="FLOAT",
+        help="pEC50 threshold above which a compound is counted as a hit in the "
+        "hit discovery curve. Default: 6.3",
+    )
     args = parser.parse_args()
     results_dir = args.results_dir
 
@@ -1334,7 +1342,8 @@ def main() -> None:
         per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.65)
     )
     generate_hit_discovery_curve(
-        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 23)
+        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 23),
+        hit_threshold=args.hit_threshold,
     )
     generate_calibration_area_per_iteration(
         per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.4)
