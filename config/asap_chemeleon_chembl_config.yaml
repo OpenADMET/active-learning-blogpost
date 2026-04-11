@@ -50,7 +50,7 @@ active_learning:
   seeds: [42, 43, 44, 45, 46]
 
   # Active learning loop parameters
-  k_iter: 10       # Number of AL iterations per run
+  k_iter: 8       # Number of AL iterations per run
   query_size: 100  # Compounds selected from the pool per iteration
   n_start: 0       # Initial labeled pool size (set to 0 when using --seed-data)
 

@@ -117,6 +117,17 @@ def run_setup(cfg: ALConfig, split_type: str, results_dir: Path = Path("results"
     )
 
     print(f"Dataset: {len(df)} compounds")
+
+    # Drop rows with missing activity values before any splitting or analysis
+    n_before = len(df)
+    df = df.dropna(subset=[cfg.dataset_activity_col]).reset_index(drop=True)
+    n_dropped = n_before - len(df)
+    if n_dropped > 0:
+        print(
+            f"Dropped {n_dropped} rows with missing '{cfg.dataset_activity_col}' values "
+            f"({len(df)} remain)."
+        )
+
     print(df[cfg.dataset_activity_col].describe())
 
     # Activity distribution plot (same data regardless of split type; idempotent)
