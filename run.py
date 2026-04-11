@@ -328,6 +328,8 @@ def run_job(
         query_size=cfg.query_size,
         n_models=cfg.n_models,
         max_epochs=cfg.max_epochs,
+        es_min_delta=cfg.es_min_delta,
+        es_patience=cfg.es_patience,
         seed=seed,
         strategy=strategy,
         verbose=True,

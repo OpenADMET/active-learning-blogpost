@@ -83,7 +83,15 @@ class ALConfig:
     n_models : int
         Committee size — number of bootstrapped ensemble members (> 0).
     max_epochs : int
-        Maximum training epochs per committee member (> 0).
+        Hard ceiling on training epochs per committee member (> 0). Early
+        stopping will typically trigger well before this limit.
+    es_min_delta : float
+        Minimum decrease in train loss that counts as an improvement for early
+        stopping. Training stops when no improvement exceeds this threshold for
+        ``es_patience`` consecutive epochs. Default is ``0.001``.
+    es_patience : int
+        Number of epochs with no improvement before early stopping triggers
+        (> 0). Default is ``15``.
     use_chemeleon : bool
         Whether to initialise each committee member from CheMeleon pretrained
         weights (``from_chemeleon`` argument of ``ChemPropModel``). Set to
@@ -120,6 +128,8 @@ class ALConfig:
     n_start: int
     n_models: int
     max_epochs: int
+    es_min_delta: float
+    es_patience: int
     use_chemeleon: bool
     cluster_method: str
     cluster_k_clusters: int
@@ -278,6 +288,19 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
     n_models = _require_pos_int(tr, "n_models", "training")
     max_epochs = _require_pos_int(tr, "max_epochs", "training")
 
+    # early stopping parameters: optional with evidence-based defaults
+    es_min_delta = tr.get("es_min_delta", 0.001)
+    if not isinstance(es_min_delta, (int, float)) or es_min_delta <= 0:
+        errors.append(
+            f"[training] 'es_min_delta' must be a positive float, got {es_min_delta!r}"
+        )
+
+    es_patience = tr.get("es_patience", 15)
+    if not isinstance(es_patience, int) or es_patience <= 0:
+        errors.append(
+            f"[training] 'es_patience' must be a positive integer, got {es_patience!r}"
+        )
+
     # use_chemeleon: optional bool, defaults to True for backward compatibility
     use_chemeleon = tr.get("use_chemeleon", True)
     if not isinstance(use_chemeleon, bool):
@@ -368,6 +391,8 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         n_start=n_start,
         n_models=n_models,
         max_epochs=max_epochs,
+        es_min_delta=es_min_delta,
+        es_patience=es_patience,
         use_chemeleon=use_chemeleon,
         cluster_method=cluster_method,
         cluster_k_clusters=cluster_k_clusters,

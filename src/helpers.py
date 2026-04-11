@@ -297,7 +297,14 @@ def featurize(smiles_list: list[str], y_list: list[float] | np.ndarray | None = 
     return loader, scaler
 
 
-def build_committee_member(seed: int = 42, max_epochs: int = 20, log_dir: str | bool = False, use_chemeleon: bool = True) -> tuple:
+def build_committee_member(
+    seed: int = 42,
+    max_epochs: int = 200,
+    log_dir: str | bool = False,
+    use_chemeleon: bool = True,
+    es_min_delta: float = 0.001,
+    es_patience: int = 15,
+) -> tuple:
     """Construct a single ChemProp committee member paired with a LightningTrainer.
 
     Parameters
@@ -306,13 +313,20 @@ def build_committee_member(seed: int = 42, max_epochs: int = 20, log_dir: str | 
         Random seed passed to ``pl.seed_everything`` for full reproducibility
         across model weights and data-loader shuffling. Default is 42.
     max_epochs : int, optional
-        Maximum number of training epochs for the LightningTrainer. Default is 20.
+        Hard ceiling on training epochs; early stopping will typically trigger
+        before this limit. Default is 200.
     log_dir : str or False, optional
         Output directory for training logs and checkpoints. Pass ``False`` (or
         ``None``) to disable logging. Default is False.
     use_chemeleon : bool, optional
         Whether to initialise the model from CheMeleon pretrained weights.
         Set to ``False`` for random-initialisation ablations. Default is True.
+    es_min_delta : float, optional
+        Minimum decrease in train loss that counts as an improvement for early
+        stopping. Default is 0.001.
+    es_patience : int, optional
+        Number of epochs with no improvement before early stopping triggers.
+        Default is 15.
 
     Returns
     -------
@@ -349,13 +363,16 @@ def build_committee_member(seed: int = 42, max_epochs: int = 20, log_dir: str | 
         else pathlib.Path(tempfile.mkdtemp(prefix="al_logs_"))
     )
 
-    # Define the trainer
+    # Early stopping monitors train_loss (no val split in the AL loop)
     trainer = LightningTrainer(
         output_dir=_output_dir,
         max_epochs=max_epochs,
         accelerator="gpu",
         devices=1,
-        early_stopping=False,
+        early_stopping=True,
+        early_stopping_min_delta=es_min_delta,
+        early_stopping_patience=es_patience,
+        early_stopping_mode="min",
         gradient_clip_val=0.5,
     )
 
@@ -369,7 +386,9 @@ def train_committee(
     y_labeled: pd.Series,
     n_models: int = 5,
     seed: int = 42,
-    max_epochs: int = 20,
+    max_epochs: int = 200,
+    es_min_delta: float = 0.001,
+    es_patience: int = 15,
     use_chemeleon: bool = True,
 ) -> CommitteeRegressor:
     """Train a committee of ChemProp models on bootstrapped data.
@@ -389,7 +408,14 @@ def train_committee(
         Base random seed; each member uses ``seed + i`` for reproducibility.
         Default is 42.
     max_epochs : int, optional
-        Maximum training epochs per committee member. Default is 20.
+        Hard ceiling on training epochs; early stopping typically triggers
+        before this limit. Default is 200.
+    es_min_delta : float, optional
+        Minimum decrease in train loss that counts as an improvement for early
+        stopping. Default is 0.001.
+    es_patience : int, optional
+        Number of epochs with no improvement before early stopping triggers.
+        Default is 15.
     use_chemeleon : bool, optional
         Whether to initialise each committee member from CheMeleon pretrained
         weights. Set to ``False`` for random-initialisation ablations.
@@ -408,7 +434,12 @@ def train_committee(
         with tempfile.TemporaryDirectory(prefix="al_logs_") as tmp_dir:
             # Build and seed member first so pl.seed_everything controls dataloader shuffle
             model, trainer = build_committee_member(
-                seed=seed * n_models + i, max_epochs=max_epochs, log_dir=tmp_dir, use_chemeleon=use_chemeleon
+                seed=seed * n_models + i,
+                max_epochs=max_epochs,
+                log_dir=tmp_dir,
+                use_chemeleon=use_chemeleon,
+                es_min_delta=es_min_delta,
+                es_patience=es_patience,
             )
 
             # Bootstrap resampling
@@ -594,7 +625,9 @@ def run_active_learning(
     k_iter: int = 15,
     query_size: int = 20,
     n_models: int = 5,
-    max_epochs: int = 20,
+    max_epochs: int = 200,
+    es_min_delta: float = 0.001,
+    es_patience: int = 15,
     seed: int = 42,
     strategy: str = "Random",
     verbose: bool = True,
@@ -628,7 +661,14 @@ def run_active_learning(
     n_models : int, optional
         Number of committee members to train at each iteration. Default is 5.
     max_epochs : int, optional
-        Maximum training epochs per committee member. Default is 20.
+        Hard ceiling on training epochs per committee member; early stopping
+        typically triggers before this limit. Default is 200.
+    es_min_delta : float, optional
+        Minimum decrease in train loss that counts as an improvement for early
+        stopping. Default is 0.001.
+    es_patience : int, optional
+        Number of epochs with no improvement before early stopping triggers.
+        Default is 15.
     seed : int, optional
         Base random seed for both initial selection and subsequent queries.
         Default is 42.
@@ -762,6 +802,8 @@ def run_active_learning(
             df_train_fit["pEC50"],
             n_models=n_models,
             max_epochs=max_epochs,
+            es_min_delta=es_min_delta,
+            es_patience=es_patience,
             seed=seed + k,
             use_chemeleon=use_chemeleon,
         )

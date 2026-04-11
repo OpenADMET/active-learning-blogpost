@@ -56,7 +56,9 @@ active_learning:
 
 training:
   n_models: 5      # Committee size (number of bootstrapped ensemble members)
-  max_epochs: 20   # Maximum training epochs per committee member
+  max_epochs: 200   # Hard ceiling; early stopping will trigger before this
+  es_min_delta: 0.001  # Min train-loss decrease to count as improvement
+  es_patience: 15      # Epochs without improvement before stopping
   use_chemeleon: false  # Whether to initialise each committee member from CheMeleon pretrained weights
 
 clustering:
