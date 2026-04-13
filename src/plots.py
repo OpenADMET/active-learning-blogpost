@@ -99,12 +99,21 @@ def plot_learning_curve_with_bands(
             )
         )
 
+    # Autodetect y-axis bounds from the plotted strategies' data.
+    # Lower bound: 0 when all values are non-negative; 5% below the minimum otherwise.
+    # Upper bound: 5% above the maximum of the upper band.
+    relevant = learning_curve_df[learning_curve_df["strategy"].isin(strategy_order)]
+    y_min = relevant[f"{metric_col}_lower"].min() if not relevant.empty else 0.0
+    y_max = relevant[f"{metric_col}_upper"].max() if not relevant.empty else 1.0
+    y_lower = 0.0 if y_min >= 0 else y_min * 1.05
+    y_upper = y_max * 1.05
+
     fig.update_layout(
         xaxis_title="Number of Labeled Molecules",
         yaxis_title=ylabel,
         legend_title="Strategy",
         xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
-        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
+        yaxis=dict(range=[y_lower, y_upper], showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         plot_bgcolor="white",
         margin=dict(t=40),
         width=width,
@@ -118,6 +127,7 @@ def plot_hit_discovery_curve(
     learning_curve_df: pd.DataFrame,
     hit_threshold: float,
     max_hits: int,
+    pool_size: int,
     strategy_order: list[str],
     color_map: dict | None = None,
     value_col: str = "pEC50",
@@ -126,8 +136,9 @@ def plot_hit_discovery_curve(
 ) -> go.Figure:
     """Interactive line plot of cumulative hits found vs. number of labeled molecules.
 
-    Shows mean ± 1σ bands per strategy and a dashed reference line at the absolute
-    hit ceiling.
+    Shows mean ± 1σ bands per strategy, a diagonal dashed gray reference line for
+    the expected hits under random (uniform) acquisition, and a dashed reference line
+    at the absolute hit ceiling.
 
     Parameters
     ----------
@@ -143,6 +154,9 @@ def plot_hit_discovery_curve(
         Total number of hits in the full compound pool — an absolute upper bound
         independent of strategy or seed. Used as the dashed reference line and as
         the ceiling for the upper error band.
+    pool_size : int
+        Total number of compounds in the pool. Defines the x-extent of the diagonal
+        random-acquisition baseline (a linear ramp from (0, 0) to (pool_size, max_hits)).
     strategy_order : list[str]
         Strategies to plot, controls legend order.
     color_map : dict or None, optional
@@ -156,7 +170,8 @@ def plot_hit_discovery_curve(
     -------
     go.Figure
         Interactive Plotly figure showing cumulative hits vs. labeled pool size, with
-        a dashed reference line at the total hit ceiling.
+        a diagonal random-acquisition baseline and a dashed reference line at the
+        total hit ceiling.
 
     """
     # Count hits per (strategy, seed, iteration), then map to n_labeled
@@ -188,6 +203,18 @@ def plot_hit_discovery_curve(
     )
 
     fig = go.Figure()
+
+    # Random baseline: linear ramp from (0, 0) to (pool_size, max_hits)
+    fig.add_trace(
+        go.Scatter(
+            x=[0, pool_size],
+            y=[0, max_hits],
+            mode="lines",
+            name="Random (expected)",
+            line=dict(color="#888888", width=1.2, dash="dash"),
+            hoverinfo="skip",
+        )
+    )
 
     for strategy in strategy_order:
         df_sub = hits_summary[hits_summary["strategy"] == strategy].sort_values(
@@ -245,12 +272,18 @@ def plot_hit_discovery_curve(
         annotation_position="top right",
     )
 
+    # Autodetect upper y bound: 5% above the max of the upper bands and the hit ceiling.
+    y_upper = max(
+        hits_summary["n_hits_upper"].max() if not hits_summary.empty else 0,
+        max_hits,
+    ) * 1.05
+
     fig.update_layout(
         xaxis_title="Number of Labeled Molecules",
         yaxis_title=f"Hits Found ({value_col} ≥ {hit_threshold})",
         legend_title="Strategy",
         xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
-        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
+        yaxis=dict(range=[0, y_upper], showgrid=True, gridcolor="rgba(0,0,0,0.1)", gridwidth=1, showline=True, linecolor="black", linewidth=1, mirror=True),
         plot_bgcolor="white",
         margin=dict(t=40),
         width=width,

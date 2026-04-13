@@ -587,13 +587,11 @@ def generate_learning_curve_mae(
     cfg: ALConfig,
     results_dir: str | Path,
     svg_queue: list[tuple],
-    *,
-    xlim: tuple[float, float] | None = None,
-    ylim: tuple[float, float] | None = None,
 ) -> None:
     """Generate and save the MAE learning curve figure.
 
     Produces ``learning_curve_mae.html`` and queues the SVG export.
+    Y-axis bounds are autodetected from the data.
 
     Parameters
     ----------
@@ -605,10 +603,6 @@ def generate_learning_curve_mae(
         Directory to write output files.
     svg_queue : list of tuple
         Accumulator list for batch SVG export.
-    xlim : tuple[float, float] or None, optional
-        X-axis range override for the output figure.
-    ylim : tuple[float, float] or None, optional
-        Y-axis range override for the output figure.
     """
     print("Generating learning curve (MAE)...")
     figs: dict[str, go.Figure] = {}
@@ -622,9 +616,7 @@ def generate_learning_curve_mae(
             strategy_order=cfg.strategies,
             color_map=STRATEGY_COLORS,
         )
-    _save_multisplit(
-        figs, "learning_curve_mae", results_dir, svg_queue, xlim=xlim, ylim=ylim
-    )
+    _save_multisplit(figs, "learning_curve_mae", results_dir, svg_queue)
 
 
 def generate_learning_curve_ktau(
@@ -632,13 +624,12 @@ def generate_learning_curve_ktau(
     cfg: ALConfig,
     results_dir: str | Path,
     svg_queue: list[tuple],
-    *,
-    xlim: tuple[float, float] | None = None,
-    ylim: tuple[float, float] | None = None,
 ) -> None:
     """Generate and save the Kendall's τ learning curve figure.
 
     Produces ``learning_curve_ktau.html`` and queues the SVG export.
+    Y-axis bounds are autodetected from the data; the lower bound is 0 when all
+    values are non-negative, otherwise the minimum is autodetected.
 
     Parameters
     ----------
@@ -650,10 +641,6 @@ def generate_learning_curve_ktau(
         Directory to write output files.
     svg_queue : list of tuple
         Accumulator list for batch SVG export.
-    xlim : tuple[float, float] or None, optional
-        X-axis range override for the output figure.
-    ylim : tuple[float, float] or None, optional
-        Y-axis range override for the output figure.
     """
     print("Generating learning curve (Kendall's τ)...")
     figs: dict[str, go.Figure] = {}
@@ -667,9 +654,7 @@ def generate_learning_curve_ktau(
             strategy_order=cfg.strategies,
             color_map=STRATEGY_COLORS,
         )
-    _save_multisplit(
-        figs, "learning_curve_ktau", results_dir, svg_queue, xlim=xlim, ylim=ylim
-    )
+    _save_multisplit(figs, "learning_curve_ktau", results_dir, svg_queue)
 
 
 def generate_hit_discovery_curve(
@@ -679,12 +664,11 @@ def generate_hit_discovery_curve(
     svg_queue: list[tuple],
     *,
     hit_threshold: float = 7.0,
-    xlim: tuple[float, float] | None = None,
-    ylim: tuple[float, float] | None = None,
 ) -> None:
     """Generate and save the hit discovery curve figure.
 
     Produces ``hit_discovery_curve.html`` and queues the SVG export.
+    Y-axis bounds are autodetected from the data (lower bound fixed at 0).
 
     Parameters
     ----------
@@ -697,11 +681,7 @@ def generate_hit_discovery_curve(
     svg_queue : list of tuple
         Accumulator list for batch SVG export.
     hit_threshold : float, optional
-        pEC50 value above which a compound is counted as a hit. Default 6.3.
-    xlim : tuple[float, float] or None, optional
-        X-axis range override for the output figure.
-    ylim : tuple[float, float] or None, optional
-        Y-axis range override for the output figure.
+        pEC50 value above which a compound is counted as a hit. Default 7.0.
     """
     print("Generating hit discovery curve...")
     figs: dict[str, go.Figure] = {}
@@ -716,12 +696,12 @@ def generate_hit_discovery_curve(
             per_split_data[sp]["learning_curve_long"],
             hit_threshold=hit_threshold,
             max_hits=max_hits_sp,
+            pool_size=len(per_split_data[sp]["df_pool"]),
             strategy_order=cfg.strategies,
             color_map=STRATEGY_COLORS,
         )
-    _save_multisplit(
-        figs, "hit_discovery_curve", results_dir, svg_queue, xlim=xlim, ylim=ylim
-    )
+    _save_multisplit(figs, "hit_discovery_curve", results_dir, svg_queue)
+
 
 
 def generate_calibration_area_per_iteration(
@@ -1296,9 +1276,10 @@ def main() -> None:
     4. Generate all figures, writing HTML files and queuing SVG exports.
     5. Batch-export all Plotly figures to SVG via a single Kaleido session.
 
-    Axis limit overrides for individual figures can be set by passing ``xlim``
-    and ``ylim`` keyword arguments to the corresponding ``generate_*`` functions
-    below.
+    Learning curve and hit discovery y-axis bounds are autodetected from the data.
+    Axis limit overrides for calibration figures can be set by passing ``xlim``
+    and ``ylim`` keyword arguments to ``generate_calibration_area_per_iteration``
+    and ``generate_sigma_error_correlation`` below.
     """
     parser = argparse.ArgumentParser(
         description="Analysis and visualisation for the active learning pipeline."
@@ -1337,14 +1318,10 @@ def main() -> None:
     Path(results_dir).mkdir(parents=True, exist_ok=True)
     svg_queue: list[tuple] = []
 
-    generate_learning_curve_mae(
-        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.85)
-    )
-    generate_learning_curve_ktau(
-        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.65)
-    )
+    generate_learning_curve_mae(per_split_data, cfg, results_dir, svg_queue)
+    generate_learning_curve_ktau(per_split_data, cfg, results_dir, svg_queue)
     generate_hit_discovery_curve(
-        per_split_data, cfg, results_dir, svg_queue, ylim=(0, 23),
+        per_split_data, cfg, results_dir, svg_queue,
         hit_threshold=args.hit_threshold,
     )
     generate_calibration_area_per_iteration(
