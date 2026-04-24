@@ -32,11 +32,17 @@ What we are **querying** is a large pool of unlabeled candidate compounds. Their
 
 Our benchmark is designed around an as-realistic-as-possible scenario: you have a folder of legacy assay data from the public domain or a related project, a plate of untested candidate compounds, and a busy lab with queues, staff, and resource requirements. The choices below are a best-effort attempt to weight these practical considerations.
 
-### Cold-starting with a foundation model and historical data
+### Starting conditions: model initialization and historical data
 
-The earliest iterations of an active learning campaign are the most precarious. With only a handful of labeled compounds, a model trained from scratch has limited reliable signal. Its predictions are essentially noise, and any acquisition strategy built on those predictions is resultingly noisy.
+The earliest iterations of an active learning campaign are the most precarious. With only a handful of labeled compounds, a model trained from scratch has limited reliable signal. Its predictions are essentially noise, and any acquisition strategy built on those predictions is resultingly noisy. Rather than picking a single starting condition, we treat this as a variable and compare three configurations:
 
-We address this in two ways. First, rather than initializing the committee with random weights, we use [**CheMeleon**](https://github.com/JacksonBurns/chemeleon), a graph neural network pretrained on millions of molecules. Pretraining instills broadly useful molecular representations that transfer well to novel tasks, giving the model a usable prior before any target-specific data arrives. Second, we seed training with publically available measurements from [ChEMBL](https://www.ebi.ac.uk/chembl/) (~600 entries). This mirrors the real-world scenario in which a practitioner begins a new project, wielding what's practically available and useful against plates of untested compounds.
+1. **ChemProp (random init, no ChEMBL)** — a [ChemProp](https://github.com/chemprop/chemprop) message-passing neural network initialized with random weights and no external pretraining data. This is the true cold-start baseline: the model must learn everything it knows from the compounds queried during the campaign itself.
+
+2. **[CheMeleon](https://github.com/JacksonBurns/chemeleon) (no ChEMBL)** — the same MPNN architecture, but initialized from CheMeleon weights pretrained on millions of molecules. Pretraining instills broadly useful molecular representations that transfer well to novel tasks, giving the model a usable prior before any target-specific data arrives — without requiring any target-relevant historical measurements.
+
+3. **CheMeleon + ChEMBL** — CheMeleon weights further augmented by seeding training with publicly available target-relevant measurements from [ChEMBL](https://www.ebi.ac.uk/chembl/) (~600 entries). This mirrors the real-world scenario in which a practitioner begins a new project armed with both a pretrained backbone and whatever historical assay data is practically available.
+
+Comparing these three conditions lets us disentangle the contributions of *architectural pretraining* and *historical data* to early-campaign performance, and assess whether the additional setup cost of sourcing ChEMBL data is worth it.
 
 ### Evaluating generalization
 
