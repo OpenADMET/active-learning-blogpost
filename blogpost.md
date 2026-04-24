@@ -46,15 +46,11 @@ Comparing these three conditions lets us disentangle the contributions of *archi
 
 ### Evaluating generalization
 
-To measure how well the model performs, we hold out a fixed test set before the campaign begins and never touch it during acquisition. But the choice of how to construct that test set assesses different real-world scenarios.
+To measure how well the model performs, we hold out a fixed test set before the campaign begins and never touch it during acquisition. The right way to construct that test set depends on the structure of the data.
 
-A **random split** is optimistic: structurally similar molecules can appear in both training and test sets, allowing a model to memorize a series rather than learn the underlying [structure-activity relationship (SAR)](https://en.wikipedia.org/wiki/Structure%E2%80%93activity_relationship). We include it as an upper-bound baseline.
+**For PXR**, the pool is drawn from an Enamine diversity deck — a collection explicitly designed for maximal structural coverage. As a result, the dataset is not very self-similar: random, scaffold, and cluster splits yield comparable model performance, because the test compounds are no more structurally foreign to the training set than they would be under any other partitioning scheme. Given this, we use a simple **random 80/20 split**. The 80% becomes the candidate pool for the active learner; the 20% is the held-out evaluation benchmark used throughout all iterations.
 
-A **scaffold split** based on [Bemis-Murcko scaffolds](https://practicalcheminformatics.blogspot.com/2021/10/exploratory-data-analysis-with.html) is more demanding: it forces the test set to contain chemical series not seen during training, better representing the challenge of predicting activity for genuinely new chemical matter. 
-
-> **Cluster** and **time split** data represent more challenging and more realistic configurations, but admittedly scaffold split is easier to implement, and our data does not have meaningful temporal signal.
-
-Together, these two splits bracket the likely real-world performance range. The 80% training split becomes the candidate pool for the active learner; the 20% test split is the fixed evaluation benchmark used throughout all iterations.
+**For ASAP Mpro**, the data was generated in chronological waves of medicinal chemistry iteration, so a meaningful temporal signal exists. We use the **predefined time split** provided with the dataset, which mirrors how the data would have been encountered in a real campaign: earlier compounds for training, later compounds for evaluation. This is a more realistic test of generalization — the model must predict activity for chemical matter synthesized *after* the training cutoff, capturing the true challenge of prospective prediction in drug discovery.
 
 ### Query batch size: matching the lab
 
