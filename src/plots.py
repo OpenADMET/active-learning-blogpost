@@ -276,7 +276,7 @@ def plot_hit_discovery_curve(
     y_upper = max(
         hits_summary["n_hits_upper"].max() if not hits_summary.empty else 0,
         max_hits,
-    ) * 1.05
+    ) * 1.10
 
     fig.update_layout(
         xaxis_title="Number of Labeled Molecules",
