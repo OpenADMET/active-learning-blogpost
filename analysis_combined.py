@@ -201,6 +201,7 @@ def _hit_panel_data(data: dict, hit_threshold: float) -> dict:
 
 
 def main() -> None:
+    """Entry point: parse CLI arguments, load all configs, and write figures."""
     parser = argparse.ArgumentParser(
         description="Generate cross-config comparison figures for ASAP and PXR."
     )
@@ -309,7 +310,7 @@ def main() -> None:
         (label, data["learning_curve_summary"])
         for (label, _, _, _slug), data in zip(ASAP_CONFIGS, asap_data)
     ]]
-    asap_hit_panels = [[
+    asap_hit_panels: list[list[tuple[str, dict | None]]] = [[
         (label, _hit_panel_data(data, hit_thr))
         for (label, _, _, _slug), data in zip(ASAP_CONFIGS, asap_data)
     ]]
@@ -349,7 +350,7 @@ def main() -> None:
             (PXR_CONFIGS[3][0], pxr_data[3]["learning_curve_summary"]),
         ],
     ]
-    pxr_hit_panels = [
+    pxr_hit_panels: list[list[tuple[str, dict | None]]] = [
         [
             (PXR_CONFIGS[0][0], _hit_panel_data(pxr_data[0], hit_thr)),
             (PXR_CONFIGS[1][0], _hit_panel_data(pxr_data[1], hit_thr)),

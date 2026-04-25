@@ -5,6 +5,8 @@ Figures share a consistent visual style: white background, black axes, and
 per-strategy colors from ``src.helpers.STRATEGY_COLORS``.
 """
 
+from typing import Any
+
 import matplotlib.cm as mcm
 import matplotlib.colors as mcolors
 import numpy as np
@@ -1491,12 +1493,12 @@ def plot_hit_discovery_curve_grid(
     )
 
     # Compute per-panel summaries first (needed for global y bounds).
-    summaries: list[list[tuple | None]] = []
+    summaries: list[list[tuple[Any, ...] | None]] = []
     for row in panels:
-        row_summaries = []
+        row_cells: list[tuple[Any, ...] | None] = []
         for _, data in row:
             if data is None:
-                row_summaries.append(None)
+                row_cells.append(None)
                 continue
             pool_history_df = data["pool_history_df"]
             learning_curve_df = data["learning_curve_df"]
@@ -1524,13 +1526,13 @@ def plot_hit_discovery_curve_grid(
                 hits_summary["n_hits_mean"] + hits_summary["n_hits_std"],
                 data["max_hits"],
             )
-            row_summaries.append((hits_summary, data["max_hits"], data["pool_size"]))
-        summaries.append(row_summaries)
+            row_cells.append((hits_summary, data["max_hits"], data["pool_size"]))
+        summaries.append(row_cells)
 
     # Shared y upper bound across all panels.
     global_y_upper = 0.0
-    for r_idx, row_summaries in enumerate(summaries):
-        for c_idx, cell in enumerate(row_summaries):
+    for r_idx, row_cells in enumerate(summaries):
+        for c_idx, cell in enumerate(row_cells):
             if cell is None:
                 continue
             hits_summary, max_hits, _ = cell
@@ -1542,8 +1544,8 @@ def plot_hit_discovery_curve_grid(
 
     legend_shown: set[str] = set()
 
-    for r_idx, (row, row_summaries) in enumerate(zip(panels, summaries)):
-        for c_idx, ((_, data), cell) in enumerate(zip(row, row_summaries)):
+    for r_idx, (row, row_cells) in enumerate(zip(panels, summaries)):
+        for c_idx, ((_, data), cell) in enumerate(zip(row, row_cells)):
             row_num, col_num = r_idx + 1, c_idx + 1
             if data is None or cell is None:
                 continue
