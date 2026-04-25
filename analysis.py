@@ -55,7 +55,6 @@ import uncertainty_toolbox as uct  # noqa: E402
 from kaleido import Kaleido  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
 from mpl_toolkits.axes_grid1 import make_axes_locatable  # noqa: E402
-from plotly.subplots import make_subplots  # noqa: E402
 from scipy.stats import spearmanr  # noqa: E402
 
 import src.plots as alp  # noqa: E402
@@ -66,161 +65,6 @@ from src.helpers import (  # noqa: E402
 )
 
 warnings.filterwarnings("ignore")
-
-
-def _remap_for_col2(d: dict) -> dict:
-    """Remap single-panel axis refs to second-column subplot refs.
-
-    ``add_hline`` / ``add_vline`` write shapes and annotations that reference
-    ``xref="x domain"`` / ``yref="y"``.  When those objects are transplanted
-    into the right panel of a two-column subplot the refs must point to the
-    second set of axes (``x2 domain`` / ``y2``).
-
-    Parameters
-    ----------
-    d : dict
-        Shape or annotation dict (from ``to_plotly_json()``).
-
-    Returns
-    -------
-    dict
-        Copy of *d* with ``xref`` and ``yref`` remapped for column 2.
-    """
-    _MAP = {"x": "x2", "x domain": "x2 domain", "y": "y2"}
-    out = dict(d)
-    if "xref" in out:
-        out["xref"] = _MAP.get(out["xref"], out["xref"])
-    if "yref" in out and out["yref"] != "paper":
-        out["yref"] = _MAP.get(out["yref"], out["yref"])
-    return out
-
-
-def _combine_figures_side_by_side(
-    fig_left: go.Figure,
-    fig_right: go.Figure,
-    title_left: str = "Scaffold Split",
-    title_right: str = "Random Split",
-) -> go.Figure:
-    """Merge two Plotly figures into a two-column subplot.
-
-    Traces from ``fig_left`` occupy the left panel; traces from ``fig_right``
-    occupy the right panel. Legend entries are shown only once (left panel),
-    so the right panel entries are suppressed. ``fill="tonexty"`` bands are
-    handled correctly because Plotly restricts fills to traces sharing the
-    same axis reference.
-
-    Shapes and annotations (e.g. ``add_hline`` reference lines) are copied
-    from both source figures with axis references adjusted for the correct
-    subplot column.  Background colour and axis styling (grid colour, border
-    lines, etc.) are inherited from ``fig_left`` so the combined figure
-    matches the appearance of its source panels.
-
-    Parameters
-    ----------
-    fig_left : go.Figure
-        Figure for the left panel (typically scaffold split).
-    fig_right : go.Figure
-        Figure for the right panel (typically random split).
-    title_left : str
-        Subplot title for the left panel.
-    title_right : str
-        Subplot title for the right panel.
-
-    Returns
-    -------
-    go.Figure
-        Combined two-panel figure with doubled width.
-
-    """
-    combined = make_subplots(
-        rows=1,
-        cols=2,
-        subplot_titles=[title_left, title_right],
-        horizontal_spacing=0.10,
-    )
-
-    # Left-justify subplot titles: move each from panel-centre to panel-left edge.
-    # make_subplots always places the two titles as the first two annotations.
-    _left_edge = combined.layout.xaxis.domain[0]
-    _right_edge = combined.layout.xaxis2.domain[0]
-    _title_annots = []
-    for i, (annot, x_pos) in enumerate(
-        zip(combined.layout.annotations, [_left_edge, _right_edge])
-    ):
-        d = annot.to_plotly_json()
-        d["x"] = x_pos
-        d["xanchor"] = "left"
-        _title_annots.append(d)
-    combined.update_layout(annotations=_title_annots)
-
-    for trace in fig_left.data:
-        combined.add_trace(trace, row=1, col=1)
-    for trace in fig_right.data:
-        combined.add_trace(trace, row=1, col=2)
-
-    # Suppress all right-panel legend entries — already shown in the left panel
-    n_left = len(fig_left.data)
-    for i in range(n_left, len(combined.data)):
-        combined.data[i].showlegend = False
-
-    # Copy shapes (e.g. add_hline reference lines) from both source figures.
-    # Col-1 refs are already correct; col-2 refs need remapping.
-    left_shapes = [s.to_plotly_json() for s in (fig_left.layout.shapes or [])]
-    right_shapes = [
-        _remap_for_col2(s.to_plotly_json()) for s in (fig_right.layout.shapes or [])
-    ]
-    if left_shapes or right_shapes:
-        combined.update_layout(shapes=left_shapes + right_shapes)
-
-    # Copy annotations (e.g. add_hline labels) from both source figures.
-    # Append to the existing subplot-title annotations added by make_subplots.
-    left_annots = [a.to_plotly_json() for a in (fig_left.layout.annotations or [])]
-    right_annots = [
-        _remap_for_col2(a.to_plotly_json())
-        for a in (fig_right.layout.annotations or [])
-    ]
-    if left_annots or right_annots:
-        existing = list(combined.layout.annotations or [])
-        combined.update_layout(annotations=existing + left_annots + right_annots)
-
-    # Propagate background colours from the left source figure
-    combined.update_layout(
-        plot_bgcolor=fig_left.layout.plot_bgcolor or "white",
-        paper_bgcolor=fig_left.layout.paper_bgcolor or "white",
-    )
-
-    # Propagate axis style (grid, border lines) from the left source figure to
-    # all panels.  Structural properties (title, domain, anchor) are excluded
-    # because make_subplots assigns those and they differ per panel.
-    _SKIP = {"title", "domain", "anchor", "matches", "scaleanchor", "scaleratio"}
-    _xstyle = {
-        k: v
-        for k, v in fig_left.layout.xaxis.to_plotly_json().items()
-        if k not in _SKIP
-    }
-    _ystyle = {
-        k: v
-        for k, v in fig_left.layout.yaxis.to_plotly_json().items()
-        if k not in _SKIP
-    }
-    if _xstyle:
-        combined.update_xaxes(**_xstyle)
-    if _ystyle:
-        combined.update_yaxes(**_ystyle)
-
-    # Mirror axis labels from the left figure to both panels
-    x_title = fig_left.layout.xaxis.title.text or ""
-    y_title = fig_left.layout.yaxis.title.text or ""
-    combined.update_xaxes(title_text=x_title)
-    combined.update_yaxes(title_text=y_title)
-
-    w = fig_left.layout.width or 700
-    h = fig_left.layout.height or 450
-    _bottom_margin = (
-        fig_left.layout.margin.b if fig_left.layout.margin.b is not None else 80
-    )
-    combined.update_layout(width=w * 2, height=h, margin=dict(t=_bottom_margin))
-    return combined
 
 
 def load_setups(results_dir: str | Path = "results") -> dict[str, dict]:
@@ -538,19 +382,18 @@ def _save_multisplit(
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
-    """Combine split-type figures and write HTML + queue SVG export.
+    """Write a figure to HTML and queue it for SVG export.
 
-    When two or more keys are present in *figs*, the first two figures are
-    merged into a two-panel side-by-side layout with panel titles derived from
-    the split type names (e.g. ``"scaffold"`` → ``"Scaffold Split"``).
-    If only one figure is present it is used as-is.
+    Takes the first (and expected only) figure from *figs* and writes it
+    to ``<results_dir>/<fname>.html``, then appends it to *svg_queue* for
+    batch SVG export via :func:`export_plotly_svgs`.
 
     Parameters
     ----------
     figs : dict[str, go.Figure]
-        Mapping from split type to Plotly figure.
+        Mapping from split type to Plotly figure. Only the first entry is used.
     fname : str
-        Output filename stem (written to ``<results_dir>/<fname>.html``).
+        Output filename stem.
     results_dir : str or Path
         Directory to write output files.
     svg_queue : list of tuple
@@ -561,19 +404,9 @@ def _save_multisplit(
     ylim : tuple[float, float] or None, optional
         If provided, sets the y-axis range on the output figure.
     """
-    split_keys = list(figs.keys())
-    if len(split_keys) >= 2:
-        left_key, right_key = split_keys[0], split_keys[1]
-        out = _combine_figures_side_by_side(
-            figs[left_key],
-            figs[right_key],
-            title_left=f"{left_key.capitalize()} Split",
-            title_right=f"{right_key.capitalize()} Split",
-        )
-    elif split_keys:
-        out = next(iter(figs.values()))
-    else:
+    if not figs:
         return
+    out = next(iter(figs.values()))
     if xlim is not None:
         out.update_xaxes(range=list(xlim))
     if ylim is not None:

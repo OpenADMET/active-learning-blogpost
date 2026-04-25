@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from faerun import Faerun
+from plotly.subplots import make_subplots
 
 
 def plot_learning_curve_with_bands(
@@ -1270,3 +1271,406 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
         hex_color = "".join(c * 2 for c in hex_color)
     r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
     return f"rgba({r},{g},{b},{alpha})"
+
+
+def plot_learning_curve_grid(
+    panels: list[list[tuple[str, "pd.DataFrame | None"]]],
+    metric_col: str,
+    ylabel: str,
+    strategy_order: list[str],
+    color_map: dict | None = None,
+    cell_width: int = 550,
+    cell_height: int = 400,
+) -> go.Figure:
+    """Multi-panel grid of learning curves with ±1σ bands.
+
+    Parameters
+    ----------
+    panels : list of list of (title, summary_df or None)
+        Row-major 2-D grid of panels. ``None`` entries render as blank axes.
+        Each non-``None`` ``summary_df`` must have the same columns expected
+        by :func:`plot_learning_curve_with_bands`.
+    metric_col : str
+        Base name of the metric; expects ``{metric_col}_mean``,
+        ``{metric_col}_lower``, and ``{metric_col}_upper`` columns.
+    ylabel : str
+        Y-axis label applied to all panels.
+    strategy_order : list[str]
+        Strategies to plot; controls legend order.
+    color_map : dict or None, optional
+        Mapping of strategy name to CSS color string.
+    cell_width, cell_height : int, optional
+        Dimensions of each individual panel in pixels.
+
+    Returns
+    -------
+    go.Figure
+        Combined Plotly figure with one subplot per non-``None`` panel.
+        Legend entries appear once (first non-``None`` panel only).
+    """
+    n_rows = len(panels)
+    n_cols = max(len(row) for row in panels)
+
+    subplot_titles = []
+    for row in panels:
+        for title, _ in row:
+            subplot_titles.append(title)
+        for _ in range(n_cols - len(row)):
+            subplot_titles.append("")
+
+    fig = make_subplots(
+        rows=n_rows,
+        cols=n_cols,
+        subplot_titles=subplot_titles,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.15,
+    )
+
+    # Compute shared y-axis bounds across all non-None panels.
+    all_uppers, all_lowers = [], []
+    for row in panels:
+        for _, df in row:
+            if df is None:
+                continue
+            relevant = df[df["strategy"].isin(strategy_order)]
+            if relevant.empty:
+                continue
+            all_uppers.append(relevant[f"{metric_col}_upper"].max())
+            all_lowers.append(relevant[f"{metric_col}_lower"].min())
+    y_max = max(all_uppers) if all_uppers else 1.0
+    y_min = min(all_lowers) if all_lowers else 0.0
+    y_lower = 0.0 if y_min >= 0 else y_min * 1.05
+    y_upper = y_max * 1.05
+
+    legend_shown: set[str] = set()
+
+    for r_idx, row in enumerate(panels):
+        for c_idx, (_, df) in enumerate(row):
+            row_num, col_num = r_idx + 1, c_idx + 1
+            if df is None:
+                continue
+
+            for strategy in strategy_order:
+                df_sub = df[df["strategy"] == strategy].sort_values("n_labeled")
+                if df_sub.empty:
+                    continue
+                color = color_map.get(strategy) if color_map else None
+                show_legend = strategy not in legend_shown
+                if show_legend:
+                    legend_shown.add(strategy)
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_sub["n_labeled"],
+                        y=df_sub[f"{metric_col}_upper"],
+                        mode="lines",
+                        line=dict(width=0),
+                        legendgroup=strategy,
+                        showlegend=False,
+                        hoverinfo="skip",
+                        **({"line_color": color} if color else {}),
+                    ),
+                    row=row_num,
+                    col=col_num,
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_sub["n_labeled"],
+                        y=df_sub[f"{metric_col}_lower"],
+                        mode="lines",
+                        line=dict(width=0),
+                        fill="tonexty",
+                        fillcolor=(
+                            _hex_to_rgba(color, 0.15)
+                            if color
+                            else "rgba(128,128,128,0.15)"
+                        ),
+                        legendgroup=strategy,
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=row_num,
+                    col=col_num,
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_sub["n_labeled"],
+                        y=df_sub[f"{metric_col}_mean"],
+                        mode="lines",
+                        name=strategy,
+                        legendgroup=strategy,
+                        showlegend=show_legend,
+                        line=dict(width=2, color=color),
+                    ),
+                    row=row_num,
+                    col=col_num,
+                )
+
+    _axis_style = dict(
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.1)",
+        gridwidth=1,
+        showline=True,
+        linecolor="black",
+        linewidth=1,
+        mirror=True,
+    )
+    fig.update_xaxes(title_text="Number of Labeled Molecules", **_axis_style)
+    fig.update_yaxes(range=[y_lower, y_upper], title_text=ylabel, **_axis_style)
+    fig.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        legend_title="Strategy",
+        width=cell_width * n_cols,
+        height=cell_height * n_rows,
+        margin=dict(t=60, b=60),
+    )
+    return fig
+
+
+def plot_hit_discovery_curve_grid(
+    panels: list[list[tuple[str, "dict | None"]]],
+    strategy_order: list[str],
+    color_map: dict | None = None,
+    hit_threshold: float = 7.0,
+    value_col: str = "pEC50",
+    cell_width: int = 550,
+    cell_height: int = 400,
+) -> go.Figure:
+    """Multi-panel grid of hit discovery curves.
+
+    Parameters
+    ----------
+    panels : list of list of (title, panel_data or None)
+        Row-major 2-D grid. ``None`` entries render as blank axes.
+        Each non-``None`` ``panel_data`` dict must have keys:
+
+        ``pool_history_df``
+            Long-form pool history DataFrame (columns: strategy, seed,
+            iteration, {value_col}).
+        ``learning_curve_df``
+            Long-form learning curve DataFrame (columns: strategy, seed,
+            iteration, n_labeled).
+        ``max_hits``
+            Total number of hits in the pool (integer ceiling).
+        ``pool_size``
+            Total number of compounds in the pool.
+
+    strategy_order : list[str]
+        Strategies to plot; controls legend order.
+    color_map : dict or None, optional
+        Mapping of strategy name to CSS color string.
+    hit_threshold : float, optional
+        Activity threshold for counting hits. Default 7.0.
+    value_col : str, optional
+        Column name in pool_history_df for activity values.
+    cell_width, cell_height : int, optional
+        Dimensions of each individual panel in pixels.
+
+    Returns
+    -------
+    go.Figure
+        Combined Plotly figure. Legend entries appear once.
+    """
+    n_rows = len(panels)
+    n_cols = max(len(row) for row in panels)
+
+    subplot_titles = []
+    for row in panels:
+        for title, _ in row:
+            subplot_titles.append(title)
+        for _ in range(n_cols - len(row)):
+            subplot_titles.append("")
+
+    fig = make_subplots(
+        rows=n_rows,
+        cols=n_cols,
+        subplot_titles=subplot_titles,
+        horizontal_spacing=0.08,
+        vertical_spacing=0.15,
+    )
+
+    # Compute per-panel summaries first (needed for global y bounds).
+    summaries: list[list[tuple | None]] = []
+    for row in panels:
+        row_summaries = []
+        for _, data in row:
+            if data is None:
+                row_summaries.append(None)
+                continue
+            pool_history_df = data["pool_history_df"]
+            learning_curve_df = data["learning_curve_df"]
+            hits_per_seed_iter = (
+                pool_history_df.groupby(["strategy", "seed", "iteration"])[value_col]
+                .apply(lambda s: (s >= hit_threshold).sum())
+                .reset_index(name="n_hits")
+            )
+            n_labeled = learning_curve_df[
+                ["strategy", "seed", "iteration", "n_labeled"]
+            ].drop_duplicates()
+            hits_df = hits_per_seed_iter.merge(
+                n_labeled, on=["strategy", "seed", "iteration"], how="left"
+            )
+            hits_summary = (
+                hits_df.groupby(["strategy", "n_labeled"])["n_hits"]
+                .agg(n_hits_mean="mean", n_hits_std="std")
+                .reset_index()
+                .fillna({"n_hits_std": 0})
+            )
+            hits_summary["n_hits_lower"] = (
+                hits_summary["n_hits_mean"] - hits_summary["n_hits_std"]
+            )
+            hits_summary["n_hits_upper"] = np.minimum(
+                hits_summary["n_hits_mean"] + hits_summary["n_hits_std"],
+                data["max_hits"],
+            )
+            row_summaries.append((hits_summary, data["max_hits"], data["pool_size"]))
+        summaries.append(row_summaries)
+
+    # Shared y upper bound across all panels.
+    global_y_upper = 0.0
+    for r_idx, row_summaries in enumerate(summaries):
+        for c_idx, cell in enumerate(row_summaries):
+            if cell is None:
+                continue
+            hits_summary, max_hits, _ = cell
+            candidate = max(
+                hits_summary["n_hits_upper"].max() if not hits_summary.empty else 0,
+                max_hits,
+            ) * 1.10
+            global_y_upper = max(global_y_upper, candidate)
+
+    legend_shown: set[str] = set()
+
+    for r_idx, (row, row_summaries) in enumerate(zip(panels, summaries)):
+        for c_idx, ((_, data), cell) in enumerate(zip(row, row_summaries)):
+            row_num, col_num = r_idx + 1, c_idx + 1
+            if data is None or cell is None:
+                continue
+            hits_summary, max_hits, pool_size = cell
+            color = color_map.get("Random") if color_map else None
+
+            # Random acquisition baseline (diagonal ramp).
+            fig.add_trace(
+                go.Scatter(
+                    x=[0, pool_size],
+                    y=[0, max_hits],
+                    mode="lines",
+                    name="Random (expected)",
+                    legendgroup="__random_baseline__",
+                    showlegend="__random_baseline__" not in legend_shown,
+                    line=dict(color="#888888", width=1.2, dash="dash"),
+                    hoverinfo="skip",
+                ),
+                row=row_num,
+                col=col_num,
+            )
+            legend_shown.add("__random_baseline__")
+
+            for strategy in strategy_order:
+                df_sub = hits_summary[
+                    hits_summary["strategy"] == strategy
+                ].sort_values("n_labeled")
+                if df_sub.empty:
+                    continue
+                color = color_map.get(strategy) if color_map else None
+                show_legend = strategy not in legend_shown
+                if show_legend:
+                    legend_shown.add(strategy)
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_sub["n_labeled"],
+                        y=df_sub["n_hits_upper"],
+                        mode="lines",
+                        line=dict(width=0),
+                        legendgroup=strategy,
+                        showlegend=False,
+                        hoverinfo="skip",
+                        **({"line_color": color} if color else {}),
+                    ),
+                    row=row_num,
+                    col=col_num,
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_sub["n_labeled"],
+                        y=df_sub["n_hits_lower"],
+                        mode="lines",
+                        line=dict(width=0),
+                        fill="tonexty",
+                        fillcolor=(
+                            _hex_to_rgba(color, 0.15)
+                            if color
+                            else "rgba(128,128,128,0.15)"
+                        ),
+                        legendgroup=strategy,
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=row_num,
+                    col=col_num,
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=df_sub["n_labeled"],
+                        y=df_sub["n_hits_mean"],
+                        mode="lines",
+                        name=strategy,
+                        legendgroup=strategy,
+                        showlegend=show_legend,
+                        line=dict(width=2, color=color),
+                    ),
+                    row=row_num,
+                    col=col_num,
+                )
+
+            # Hit ceiling reference line (per subplot).
+            fig.add_shape(
+                type="line",
+                x0=0,
+                x1=1,
+                y0=max_hits,
+                y1=max_hits,
+                xref=f"x{'' if (r_idx * n_cols + c_idx) == 0 else r_idx * n_cols + c_idx + 1} domain",
+                yref=f"y{'' if (r_idx * n_cols + c_idx) == 0 else r_idx * n_cols + c_idx + 1}",
+                line=dict(color="black", width=1.2, dash="dash"),
+            )
+            # Annotation for the hit ceiling.
+            axis_idx = r_idx * n_cols + c_idx
+            fig.add_annotation(
+                x=1,
+                y=max_hits,
+                xref=f"x{'' if axis_idx == 0 else axis_idx + 1} domain",
+                yref=f"y{'' if axis_idx == 0 else axis_idx + 1}",
+                text=f"Total hits in pool ({max_hits})",
+                showarrow=False,
+                xanchor="right",
+                yanchor="bottom",
+                font=dict(size=11),
+            )
+
+    _axis_style = dict(
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.1)",
+        gridwidth=1,
+        showline=True,
+        linecolor="black",
+        linewidth=1,
+        mirror=True,
+    )
+    fig.update_xaxes(title_text="Number of Labeled Molecules", **_axis_style)
+    fig.update_yaxes(
+        range=[0, global_y_upper],
+        title_text=f"Hits Found ({value_col} \u2265 {hit_threshold})",
+        **_axis_style,
+    )
+    fig.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        legend_title="Strategy",
+        width=cell_width * n_cols,
+        height=cell_height * n_rows,
+        margin=dict(t=60, b=60),
+    )
+    return fig
