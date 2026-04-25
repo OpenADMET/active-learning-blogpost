@@ -206,11 +206,18 @@ def main() -> None:
         description="Generate cross-config comparison figures for ASAP and PXR."
     )
     parser.add_argument(
-        "--hit-threshold",
+        "--asap-hit-threshold",
         type=float,
         default=7.0,
         metavar="FLOAT",
-        help="Activity threshold for counting hits (default: 7.0)",
+        help="Hit threshold for ASAP Mpro figures (default: 7.0)",
+    )
+    parser.add_argument(
+        "--pxr-hit-threshold",
+        type=float,
+        default=6.0,
+        metavar="FLOAT",
+        help="Hit threshold for PXR figures (default: 6.0)",
     )
     parser.add_argument(
         "--output-dir",
@@ -221,7 +228,8 @@ def main() -> None:
     args = parser.parse_args()
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    hit_thr = args.hit_threshold
+    asap_hit_thr: float = args.asap_hit_threshold
+    pxr_hit_thr: float = args.pxr_hit_threshold
 
     svg_queue: list = []
 
@@ -270,8 +278,8 @@ def main() -> None:
         fig = alp.plot_hit_discovery_curve(
             data["pool_history_long"],
             data["learning_curve_long"],
-            hit_threshold=hit_thr,
-            max_hits=int((data["df_pool"]["pEC50"] >= hit_thr).sum()),
+            hit_threshold=asap_hit_thr,
+            max_hits=int((data["df_pool"]["pEC50"] >= asap_hit_thr).sum()),
             pool_size=len(data["df_pool"]),
             strategy_order=strategies,
             color_map=STRATEGY_COLORS,
@@ -293,8 +301,8 @@ def main() -> None:
         fig = alp.plot_hit_discovery_curve(
             data["pool_history_long"],
             data["learning_curve_long"],
-            hit_threshold=hit_thr,
-            max_hits=int((data["df_pool"]["pEC50"] >= hit_thr).sum()),
+            hit_threshold=pxr_hit_thr,
+            max_hits=int((data["df_pool"]["pEC50"] >= pxr_hit_thr).sum()),
             pool_size=len(data["df_pool"]),
             strategy_order=strategies,
             color_map=STRATEGY_COLORS,
@@ -311,7 +319,7 @@ def main() -> None:
         for (label, _, _, _slug), data in zip(ASAP_CONFIGS, asap_data)
     ]]
     asap_hit_panels: list[list[tuple[str, dict | None]]] = [[
-        (label, _hit_panel_data(data, hit_thr))
+        (label, _hit_panel_data(data, asap_hit_thr))
         for (label, _, _, _slug), data in zip(ASAP_CONFIGS, asap_data)
     ]]
 
@@ -329,7 +337,7 @@ def main() -> None:
         asap_hit_panels,
         strategy_order=strategies,
         color_map=STRATEGY_COLORS,
-        hit_threshold=hit_thr,
+        hit_threshold=asap_hit_thr,
     )
     _save_fig(fig, "asap_combined_hit_discovery", output_dir, svg_queue)
 
@@ -352,12 +360,12 @@ def main() -> None:
     ]
     pxr_hit_panels: list[list[tuple[str, dict | None]]] = [
         [
-            (PXR_CONFIGS[0][0], _hit_panel_data(pxr_data[0], hit_thr)),
-            (PXR_CONFIGS[1][0], _hit_panel_data(pxr_data[1], hit_thr)),
+            (PXR_CONFIGS[0][0], _hit_panel_data(pxr_data[0], pxr_hit_thr)),
+            (PXR_CONFIGS[1][0], _hit_panel_data(pxr_data[1], pxr_hit_thr)),
         ],
         [
-            (PXR_CONFIGS[2][0], _hit_panel_data(pxr_data[2], hit_thr)),
-            (PXR_CONFIGS[3][0], _hit_panel_data(pxr_data[3], hit_thr)),
+            (PXR_CONFIGS[2][0], _hit_panel_data(pxr_data[2], pxr_hit_thr)),
+            (PXR_CONFIGS[3][0], _hit_panel_data(pxr_data[3], pxr_hit_thr)),
         ],
     ]
 
@@ -375,7 +383,7 @@ def main() -> None:
         pxr_hit_panels,
         strategy_order=strategies,
         color_map=STRATEGY_COLORS,
-        hit_threshold=hit_thr,
+        hit_threshold=pxr_hit_thr,
     )
     _save_fig(fig, "pxr_combined_hit_discovery", output_dir, svg_queue)
 
