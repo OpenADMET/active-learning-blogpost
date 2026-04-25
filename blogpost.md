@@ -92,7 +92,7 @@ Per iteration, we track MAE, Kendall's τ, chemical space coverage (GTM- and TMA
 
 ## Hit discovery
 
-How does acquisition strategy affect how quickly we recover actives? 
+In drug discovery, the practical value of active learning is most directly measured by how quickly a campaign recovers active compounds from a screening collection. A model that identifies potent molecules earlier reduces the number of expensive assays needed before a meaningful hit list is assembled. How much leverage an active strategy has depends heavily on the density of hits in the pool. At a 1.6% hit rate, the PXR diversity deck is sparse and leaves ample room for smart acquisition to outpace random sampling. The ASAP Mpro congeneric series, at 9.0%, is richer in actives and provides a complementary scenario where even modest strategy advantages translate to large absolute differences in hits recovered. Here we evaluate whether and to what degree different acquisition strategies accelerate active discovery relative to a random sampling baseline, and whether those trends are consistent across a structurally diverse dataset and a focused congeneric one.
 
 ### PXR
 
@@ -110,7 +110,7 @@ The ASAP Mpro dataset shows the same qualitative ordering of strategies despite 
 
 ## Model accuracy
 
-How does acquisition strategy affect model accuracy over the course of the campaign? Does any particular strategy “learn more”, motivating particular experiment design to yield the most accurate models? 
+Recovering actives faster is only one dimension of campaign performance. A complementary question is whether the choice of acquisition strategy influences how well the resulting model generalizes to held-out test compounds. Strategies like Exploitation and EI bias the labeled set toward high-potency regions, which may improve performance near the top of the activity distribution at the expense of accurate prediction across the full range. Random and Diversity sampling, by contrast, maintain broader coverage and might yield better-calibrated global models despite finding fewer hits. We evaluate test-set MAE and Kendall’s τ throughout each campaign to assess whether active strategies produce more accurate models, or whether the label acquisition strategy is largely irrelevant for overall predictive performance.
 
 ### PXR
 
@@ -132,7 +132,7 @@ For ASAP Mpro, model initialization has a substantially larger effect on accurac
 
 ## Model uncertainty
 
-How does acquisition strategy affect quality of uncertainty estimates? Does a particular acquisition strategy result in the ability to better represent model error? We check how well σ *correlates* with actual prediction error, assessed via Spearman ρ between σ and absolute error.
+The acquisition functions used here (EI, UCB, and Exploration) all rely on the committee’s predicted uncertainty σ to guide selection. This means the quality of those decisions is tied directly to how well σ captures actual prediction error. If σ is poorly calibrated, meaning high-σ compounds are not systematically harder to predict, then uncertainty-driven strategies are in effect sampling from noise rather than from meaningful signal. We evaluate this directly by computing the Spearman rank correlation between σ and absolute prediction error on the held-out test set throughout each campaign. A high ρ indicates that the committee correctly identifies which test compounds it is most wrong about. A low ρ indicates that uncertainty and error are largely decoupled, and that acquisition functions relying on σ may not be steering queries as precisely as intended.
 
 ### PXR
 
