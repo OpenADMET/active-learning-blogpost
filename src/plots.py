@@ -1329,7 +1329,7 @@ def plot_learning_curve_grid(
     )
 
     # Compute shared y-axis bounds across all non-None panels.
-    all_uppers, all_lowers = [], []
+    all_uppers, all_lowers, all_x_maxes = [], [], []
     for row in panels:
         for _, df in row:
             if df is None:
@@ -1339,10 +1339,12 @@ def plot_learning_curve_grid(
                 continue
             all_uppers.append(relevant[f"{metric_col}_upper"].max())
             all_lowers.append(relevant[f"{metric_col}_lower"].min())
+            all_x_maxes.append(relevant["n_labeled"].max())
     y_max = max(all_uppers) if all_uppers else 1.0
     y_min = min(all_lowers) if all_lowers else 0.0
     y_lower = 0.0 if y_min >= 0 else y_min * 1.05
     y_upper = y_max * 1.05
+    x_upper = max(all_x_maxes) * 1.02 if all_x_maxes else 1.0
 
     legend_shown: set[str] = set()
 
@@ -1417,7 +1419,7 @@ def plot_learning_curve_grid(
         linewidth=1,
         mirror=True,
     )
-    fig.update_xaxes(title_text="Number of Labeled Molecules", **_axis_style)
+    fig.update_xaxes(range=[0, x_upper], title_text="Number of Labeled Molecules", **_axis_style)
     fig.update_yaxes(range=[y_lower, y_upper], title_text=ylabel, **_axis_style)
     fig.update_layout(
         plot_bgcolor="white",
@@ -1529,18 +1531,21 @@ def plot_hit_discovery_curve_grid(
             row_cells.append((hits_summary, data["max_hits"], data["pool_size"]))
         summaries.append(row_cells)
 
-    # Shared y upper bound across all panels.
+    # Shared y and x upper bounds across all panels.
     global_y_upper = 0.0
+    global_x_upper = 0.0
     for r_idx, row_cells in enumerate(summaries):
         for c_idx, cell in enumerate(row_cells):
             if cell is None:
                 continue
-            hits_summary, max_hits, _ = cell
+            hits_summary, max_hits, pool_size = cell
             candidate = max(
                 hits_summary["n_hits_upper"].max() if not hits_summary.empty else 0,
                 max_hits,
             ) * 1.10
             global_y_upper = max(global_y_upper, candidate)
+            if not hits_summary.empty:
+                global_x_upper = max(global_x_upper, hits_summary["n_labeled"].max())
 
     legend_shown: set[str] = set()
 
@@ -1661,7 +1666,7 @@ def plot_hit_discovery_curve_grid(
         linewidth=1,
         mirror=True,
     )
-    fig.update_xaxes(title_text="Number of Labeled Molecules", **_axis_style)
+    fig.update_xaxes(range=[0, global_x_upper * 1.02], title_text="Number of Labeled Molecules", **_axis_style)
     fig.update_yaxes(
         range=[0, global_y_upper],
         title_text=f"Hits Found ({value_col} \u2265 {hit_threshold})",
