@@ -36,6 +36,10 @@ Metrics (4 figures per target)
 Usage
 -----
     python analysis_combined.py [--hit-threshold FLOAT] [--output-dir DIR]
+
+Output files are written to ``results/combined/`` by default (gitignored).
+Pass ``--output-dir plots/`` to promote figures to the tracked plots directory
+once they are ready.
 """
 
 import argparse
@@ -209,9 +213,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--output-dir",
-        default="plots",
+        default="results/combined",
         metavar="DIR",
-        help="Output directory for figures (default: plots/)",
+        help="Output directory for figures (default: results/combined/)",
     )
     args = parser.parse_args()
     output_dir = Path(args.output_dir)
