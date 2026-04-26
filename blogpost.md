@@ -1,16 +1,16 @@
 # Model, take the wheel: active learning with PXR pEC50 data
 
-In computational drug discovery, the most valuable resource is data. Synthesizing and assaying even a handful of compounds can cost thousands of dollars and take weeks. Yet, many machine learning models are trained as if labels are free, consuming massive random splits of [ChEMBL](https://www.ebi.ac.uk/chembl/). As increasing effort turns towards acquiring assay data **specifically** for the purpose of training machine learning models, a natural question arises \- is there an intelligent way to leverage what we already know about a target to drive our assay campaign towards its target destination?
+In computational drug discovery, the most valuable resource is data. Synthesizing and assaying even a handful of compounds can cost thousands of dollars and take weeks. As increasing effort turns towards acquiring assay data **specifically** for the purpose of training machine learning models, a natural question arises \- is there an intelligent way to leverage what a model knows about a target to drive our assay campaign towards its target destination?
 
 [**Active learning (AL)**](https://en.wikipedia.org/wiki/Active_learning_\(machine_learning\)) flips the traditional machine learning paradigm. Instead of working with static training and test sets, the model iteratively selects the compounds it is uncertain about  (to "explore") or most promising (to "exploit"). We leverage what the model has learned to guide collection of high impact datapoints, amplifying model improvement and hit finding per $ spent.
 
-In this post, we build an active learning loop using [`openadmet-models`](https://github.com/OpenADMET/openadmet-models), powered by the [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) foundation model, to simulate a campaign targeting the [Pregnane X Receptor (PXR)](https://en.wikipedia.org/wiki/Pregnane_X_receptor). We compare six acquisition strategies and compare their efficacy in predictive accuracy and hit finding, all with far less data than random selection.
+In this post, we build an active learning loop using [`openadmet-models`](https://github.com/OpenADMET/openadmet-models), powered by [ChemProp](https://chemprop.readthedocs.io/en/latest/) and the [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) foundation model, to simulate a campaign targeting the [Pregnane X Receptor (PXR)](https://en.wikipedia.org/wiki/Pregnane_X_receptor) and the [main protease](https://en.wikipedia.org/wiki/3C-like_protease) (Mpro) of [SARS-CoV-2](https://en.wikipedia.org/wiki/SARS-CoV-2). We compare six acquisition strategies and compare their efficacy in predictive accuracy and hit finding, all with far less data than random selection.
 
 ## Selected targets
 
 PXR is a ligand-activated nuclear transcription factor that functions as the body's primary xenobiotic sensor, highly expressed in the liver and intestines. Its uniquely large, flexible, and hydrophobic ligand-binding pocket makes it notoriously promiscuous, capable of accommodating a massive variety of chemical scaffolds. When a molecule binds PXR, it induces [CYP3A4](https://en.wikipedia.org/wiki/CYP3A4) and related drug-metabolizing enzymes, accelerating the metabolic clearance of co-administered therapies and causing severe [drug-drug interactions (DDIs)](https://en.wikipedia.org/wiki/Drug_interaction). PXR is therefore treated as a high-priority [ADMET](https://en.wikipedia.org/wiki/ADME) antitarget. We model its binding affinity to flag this liability early in drug design, before compounds advance to costly clinical trials. Our colleagues at [Octant Bio](https://www.octant.bio/) have collected the largest public PXR dataset to date (5x larger than what's in ChEMBL, and all from the same source institution), recently released as part of a [blind challenge](https://openadmet.ghost.io/predicting-pxr-induction-we-have-liftoff/). Crucially, the PXR pool compounds are drawn from an [**Enamine diversity deck**](https://enamine.net/compound-libraries/diversity-libraries/dds-10240) — a broad, structurally diverse compound collection selected to maximally cover chemical space, rather than to optimize a particular series.
 
-Our second target is the [main protease](https://en.wikipedia.org/wiki/3C-like_protease) (Mpro) of [SARS-CoV-2](https://en.wikipedia.org/wiki/SARS-CoV-2), an essential viral enzyme and a proven antiviral drug target. The data comes from the [ASAP Discovery](https://asapdiscovery.org/) program, an open-science antiviral drug discovery consortium. Unlike the PXR diversity deck, the ASAP dataset consists of **real-world congeneric series** — tightly clustered chemical matter iterated by medicinal chemists to optimize potency — which is the typical structure of data generated during a focused lead optimization campaign.
+Our second target, SARS-CoV-2 Mpro, is an essential viral enzyme and a proven antiviral drug target. The data comes from the [ASAP Discovery](https://asapdiscovery.org/) program, an open-science antiviral drug discovery consortium. Unlike the PXR diversity deck, the ASAP dataset consists of **real-world congeneric series** — tightly clustered chemical matter iterated by medicinal chemists to optimize potency — which is the typical structure of data generated during a focused lead optimization campaign.
 
 These two targets represent contrasting active learning scenarios: PXR tests whether active learning can efficiently navigate a **broad, structurally diverse** chemical space, while ASAP Mpro tests its performance in the **focused, congeneric** setting more common in practice. A key question is whether the same acquisition strategy excels in both regimes, or whether the optimal choice depends on the nature of the compound collection.
 
@@ -28,17 +28,19 @@ Toward this end, we **query** from a large pool of “unlabeled” candidate com
 
 Our benchmark is designed around an as-realistic-as-possible scenario: you have a folder of legacy assay data from the public domain or a related project, several plates of untested candidate compounds, and a busy lab with queue, staff, and resource requirements. The choices below are a best-effort attempt to balance these practical considerations.
 
-### Cold-starting with a foundation model and public data
+### Utilizing a foundation model and/or public data
 
-The earliest iterations of an active learning campaign are the most precarious. With only a handful of labeled compounds, a model trained from scratch has limited reliable signal. Its predictions are essentially noise, and any acquisition strategy built on those predictions is resultingly noisy. Rather than picking a single starting condition, we treat this as a variable and compare three configurations:
+The earliest iterations of an active learning campaign are the most precarious. With only a handful of labeled compounds, a model trained from scratch has limited reliable signal. Its predictions are essentially noise, and any acquisition strategy built on those predictions is resultingly noisy. Rather than picking a single starting condition, we treat this as a variable and compare a 2×2 design crossing model initialization against the use of public historical data. For PXR, all four configurations are run; for Mpro, the ChEMBL data does not cover the ASAP series closely enough to be informative, so only the two no-ChEMBL configurations are evaluated.
 
 1. **ChemProp (random init, no ChEMBL)** — a [ChemProp](https://github.com/chemprop/chemprop) message-passing neural network initialized with random weights and no external pretraining data. This is the true cold-start baseline: the model must learn everything it knows from the compounds queried during the campaign itself.  
      
-2. [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) **(no ChEMBL)** — the same MPNN architecture, but initialized from CheMeleon weights pretrained on millions of molecules. Pretraining instills broadly useful molecular representations that transfer well to novel tasks, giving the model a usable prior before any target-specific data arrives — without requiring any target-relevant historical measurements.  
+2. [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) **(no ChEMBL)** — the same MPNN architecture, but initialized from CheMeleon weights pretrained on millions of molecules. Pretraining instills broadly useful molecular representations that transfer well to novel tasks, giving the model a usable prior before any target-specific data arrives, without requiring any target-relevant historical measurements.  
      
-3. **CheMeleon \+ ChEMBL** — CheMeleon weights further augmented by seeding training with publicly available target-relevant measurements from [ChEMBL](https://www.ebi.ac.uk/chembl/) (\~600 entries). This mirrors the real-world scenario in which a practitioner begins a new project armed with both a pretrained backbone and whatever historical assay data is practically available.
+3. **ChemProp \+ ChEMBL** — ChemProp with random initialization, but with training seeded by publicly available target-relevant measurements from [ChEMBL](https://www.ebi.ac.uk/chembl/) (~600 entries). This isolates the contribution of historical data independent of architectural pretraining.
 
-Comparing these three conditions lets us disentangle the contributions of *architectural pretraining* and *historical data* to early-campaign performance, and assess whether the additional setup cost of sourcing ChEMBL data is worth it.
+4. **CheMeleon \+ ChEMBL** — CheMeleon weights further augmented by the same ChEMBL seed data. This mirrors the real-world scenario in which a practitioner begins a new project armed with both a pretrained backbone and whatever historical assay data is practically available.
+
+Comparing these conditions lets us disentangle the contributions of architectural pretraining and historical data to early-campaign performance, and assess whether the additional setup cost of sourcing ChEMBL data is worth it.
 
 ### Evaluating generalization
 
@@ -54,10 +56,6 @@ Many academic demonstrations of active learning query one compound at a time —
 
 We therefore query 100 compounds per iteration, i.e. one full plate's equivalent. Even this is conservative: most labs would prefer to fill multiple plates between model retraining cycles, particularly early in a campaign when assay infrastructure is under-utilized. The gap between the batch sizes used in AL benchmarks and what labs would actually run is worth acknowledging; results from single-compound or tiny-batch settings may not transfer directly to experimental practice.
 
-## GTM chemical space embedding
-
-The **Diversity** acquisition strategy selects compounds maximally dissimilar from the current labeled set in chemical space. We measure structural distance with a **Generative Topographic Map (GTM)**, a probabilistic manifold projection that maps high-dimensional ECFP4 fingerprints onto an interpretable 2D grid. Each compound gets a single (x, y) coordinate, and pairwise Euclidean distances serve as a fast proxy for molecular dissimilarity. **This method does not use any model signal**, instead leveraging data-driven similarity to drive selection**.** We will observe the effects on both the inherently diverse PXR data, as well as the congeneric ASAP Mpro data. GTM is also used in downstream visualizations.
-
 ## Query-by-committee: how ensemble disagreement guides exploration
 
 Our committee consists of $N=5$ independent [**CheMeleon**](https://github.com/JacksonBurns/chemeleon) models. To achieve ensemble diversity, each member uses *different initialization* ([deep ensembling](https://dl.acm.org/doi/10.5555/3295222.3295387)) and trains on a [*bootstrapped*](https://en.wikipedia.org/wiki/Bootstrapping_\(statistics\)) *sample* (with replacement) of the labeled set. This diversity, captured as disagreement at prediction time, ostensibly gives the committee an indication of epistemic uncertainty for the acquisition function. When we present an unlabeled molecule to the committee, we get 5 predictions.
@@ -71,7 +69,7 @@ Different acquisition strategies leverage these metrics:
 - **Upper Confidence Bound (UCB)**: $\\mu \+ \\beta\\sigma$. Optimistically explores regions that *might* be high activity (we nominally select $\\beta=2$).  
 - **Expected Improvement (EI)**: Balances $\\mu$ and $\\sigma$ to calculate the probability of exceeding the current best label $f^\*$ (equation below).  
 - **Exploration**: Pure uncertainty sampling. Selects the $m$ compounds with the highest $\\sigma$, ignoring predicted activity. Useful as a baseline that maximizes coverage of predicted epistemic uncertainty.  
-- **Diversity**: Ignores model predictions altogether and selects the $m$ compounds farthest from the current labeled set in 2D GTM chemical space (max-min Euclidean distance), enforcing structural dissimilarity between batches.
+- **Diversity**: Ignores model predictions altogether and selects the $m$ compounds farthest from the current labeled set in 2D [generative topological map](https://en.wikipedia.org/wiki/Generative_topographic_map) (GTM) chemical space (max-min Euclidean distance), enforcing structural dissimilarity between batches.
 
 ![][image1]where ![][image2]
 
@@ -88,7 +86,7 @@ In each iteration $k$:
 5. "Acquire" the top $m$ molecules (reveal their labels).  
 6. Add them to the labeled pool and repeat.
 
-Per iteration, we track MAE, Kendall's τ, chemical space coverage (GTM- and TMAP- based), uncertainty estimates, and number of active compounds "found" during the active learning campaign.
+Per iteration, we track number of active compounds "found" during the active learning campaign, MAE, Kendall's τ, and model uncertainty estimates.
 
 ## Hit discovery
 
