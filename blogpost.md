@@ -131,22 +131,26 @@ CheMeleon outperforms ChemProp across most strategies, though the magnitude and 
 
 ChEMBL pretraining provides a useful accuracy prior at campaign start. CheMeleon+ChEMBL achieves 0.83 pEC50 MAE before any pool labels are acquired, versus 0.93 for ChemProp+ChEMBL (p=0.0002). This advantage largely disappears by n = 200 pool labels (p=0.72 for CheMeleon+ChEMBL versus CheMeleon alone), as both warm-started configurations converge to their no-ChEMBL counterparts. The ChEMBL benefit is concentrated in the very first iterations.
 
-Kendall’s τ reinforces these conclusions. ChemProp reaches τ ≈ 0.49 and CheMeleon reaches τ ≈ 0.52 by mid-campaign, with strategy bands largely overlapping within each model. **Exploitation** produces the lowest τ for ChemProp (approximately 0.42 at n = 900, p=0.0006 vs **Random**), while CheMeleon strategies are more tightly clustered (0.49 to 0.50), confirming that a biased labeled set depresses rank-ordering performance more severely for a randomly initialized model.  
 ![][image6]  
 *Figure 4\. PXR dataset Kendall's τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
+
+Kendall’s τ reinforces these conclusions. ChemProp reaches τ ≈ 0.49 and CheMeleon reaches τ ≈ 0.52 by mid-campaign, with strategy bands largely overlapping within each model. **Exploitation** produces the lowest τ for ChemProp (approximately 0.42 at n = 900, p=0.0006 vs **Random**), while CheMeleon strategies are more tightly clustered (0.49 to 0.50), confirming that a biased labeled set depresses rank-ordering performance more severely for a randomly initialized model.
 
 ### SARS-CoV-2 Mpro
 
 ![][image7]  
-*Figure 5\. ASAP SARS-CoV-2 Mpro dataset mean absolute error (MAE, pEC50 units) on the held-out random-split test set as a function of labeled pool size, for each of the six acquisition strategies. Shaded bands show ±1 SD across five random seeds.*  
-![][image8]  
-*Figure 6\. ASAP SARS-CoV-2 Mpro dataset Kendall's τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
+*Figure 5\. ASAP SARS-CoV-2 Mpro dataset mean absolute error (MAE, pEC50 units) on the held-out random-split test set as a function of labeled pool size, for each of the six acquisition strategies. Shaded bands show ±1 SD across five random seeds.*
 
 For ASAP Mpro, model initialization has a substantially larger effect on accuracy than acquisition strategy. At n = 200, CheMeleon reduces test-set MAE by 0.16 units under **Random** sampling (0.80 vs 0.96, p=0.0016) and by 0.07 units under **Exploitation** (0.73 vs 0.81), though the **Exploitation** gap does not reach significance across seeds (p=0.33), reflecting the high variance of both models under targeted early labeling on this series. The **Random** gap is robust because ChemProp, without pretrained weights, must build its representations from scratch from the most informationally dilute labeling strategy.
 
-Within each model type, strategy-driven MAE differences are larger on Mpro than on PXR at small sample sizes. For ChemProp, the spread across strategies reaches 0.17 pIC50 units at n = 200, with **Exploitation** lowest and **Diversity** highest, narrowing to below 0.05 units by n = 600. For CheMeleon, the spread remains below 0.07 units throughout the campaign. Kendall’s τ at n = 400 ranges from 0.62 to 0.65 across strategies for CheMeleon and 0.58 to 0.62 for ChemProp. Unlike PXR, where the dominant τ signal was the intra-model spread driven by **Exploitation** bias, on Mpro the inter-model gap dominates: CheMeleon produces significantly higher τ than ChemProp under **UCB**, **Exploration**, and **Diversity** (p < 0.05 for each), with the remaining strategy comparisons borderline.
+Within each model type, strategy-driven MAE differences are larger on Mpro than on PXR at small sample sizes. For ChemProp, the spread across strategies reaches 0.17 pIC50 units at n = 200, with **Exploitation** lowest and **Diversity** highest, narrowing to below 0.05 units by n = 600. For CheMeleon, the spread remains below 0.07 units throughout the campaign.
 
 The CheMeleon accuracy advantage is substantially larger on Mpro (0.08 to 0.16 MAE units) than on PXR (0.01 to 0.07 units), as pretrained representations provide a larger benefit on a focused congeneric series where pretraining patterns are more directly applicable than on a diversity deck.
+
+![][image8]  
+*Figure 6\. ASAP SARS-CoV-2 Mpro dataset Kendall’s τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
+
+Kendall’s τ at n = 400 ranges from 0.62 to 0.65 across strategies for CheMeleon and 0.58 to 0.62 for ChemProp. Unlike PXR, where the dominant τ signal was the intra-model spread driven by **Exploitation** bias, on Mpro the inter-model gap dominates: CheMeleon produces significantly higher τ than ChemProp under **UCB**, **Exploration**, and **Diversity** (p < 0.05 for each), with the remaining strategy comparisons borderline.
 
 ## Model uncertainty
 
