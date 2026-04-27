@@ -215,10 +215,11 @@ def smiles_to_tmap(
 
     Returns
     -------
-    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-        ``(x, y, s, t)`` — node x-coordinates, node y-coordinates, edge
-        source indices, and edge target indices, all as numpy arrays of length
-        n_compounds (for x/y) or n_edges (for s/t).
+    tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ``(x, y, s, t, edge_sims)`` — node x-coordinates, node y-coordinates,
+        edge source indices, edge target indices (all as numpy arrays), and
+        per-edge Tanimoto (Morgan) or estimated Jaccard (MHFP) similarities
+        for the minimum-spanning-tree edges.
 
     Raises
     ------
@@ -267,7 +268,21 @@ def smiles_to_tmap(
     cfg.node_size = node_size
 
     x, y, s, t, _ = tm.layout_from_lsh_forest(lf, config=cfg)
-    return np.array(x), np.array(y), np.array(s, dtype=int), np.array(t, dtype=int)
+    s_arr = np.array(s, dtype=int)
+    t_arr = np.array(t, dtype=int)
+
+    # Per-edge similarity: Tanimoto for Morgan, estimated Jaccard for MHFP.
+    if fp_type == "morgan":
+        a = bit_matrix[s_arr].astype(bool)
+        b = bit_matrix[t_arr].astype(bool)
+        inter = np.logical_and(a, b).sum(axis=1).astype(float)
+        union = np.logical_or(a, b).sum(axis=1).astype(float)
+        edge_sims = np.where(union > 0, inter / union, 1.0)
+    else:
+        fps_arr = np.array([list(fp) for fp in fps], dtype=np.int64)
+        edge_sims = np.mean(fps_arr[s_arr] == fps_arr[t_arr], axis=1).astype(float)
+
+    return np.array(x), np.array(y), s_arr, t_arr, edge_sims
 
 
 def featurize(smiles_list: list[str], y_list: list[float] | np.ndarray | None = None, shuffle: bool = False) -> tuple:

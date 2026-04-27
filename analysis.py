@@ -832,7 +832,7 @@ def compute_tmap_layout(df_pool: pd.DataFrame) -> tuple:
     Returns
     -------
     tuple
-        ``(x, y, s, t)`` TMAP layout arrays as returned by
+        ``(x, y, s, t, edge_sims)`` TMAP layout arrays as returned by
         :func:`src.helpers.smiles_to_tmap`.
     """
     print("Computing TMAP layout...")
@@ -847,6 +847,7 @@ def generate_tmap_figures(
     *,
     strategy: str = "Exploitation",
     split_suffix: str = "",
+    edge_similarity_threshold: float = 0.0,
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
@@ -864,7 +865,7 @@ def generate_tmap_figures(
     all_runs : dict[str, list]
         Per-strategy run histories from the primary split.
     tmap_layout : tuple
-        Pre-computed TMAP layout ``(x, y, s, t)`` from
+        Pre-computed TMAP layout ``(x, y, s, t, edge_sims)`` from
         :func:`compute_tmap_layout`.
     results_dir : str or Path
         Directory to write output files.
@@ -874,6 +875,10 @@ def generate_tmap_figures(
     split_suffix : str, optional
         String appended to output filenames before the extension, e.g.
         ``"_scaffold"``. Default is ``""`` (no suffix).
+    edge_similarity_threshold : float, optional
+        Minimum Tanimoto/Jaccard similarity for an MST edge to be drawn in
+        both the Faerun HTML and the static matplotlib snapshot. Default 0.0
+        (all edges drawn).
     xlim : tuple[float, float] or None, optional
         X-axis range override for the static matplotlib snapshot.
     ylim : tuple[float, float] or None, optional
@@ -889,11 +894,15 @@ def generate_tmap_figures(
         title="Active Learning Selection (TMAP)",
         output_name=f"tmap_selection{split_suffix}",
         output_path=f"{results_dir}/",
+        edge_similarity_threshold=edge_similarity_threshold,
     )
 
     # Static matplotlib snapshot: compounds coloured by first-acquired iteration
     print("Generating static TMAP snapshot...")
-    tx, ty, ts, tt = tmap_layout
+    tx, ty, ts, tt, t_edge_sims = tmap_layout
+    if edge_similarity_threshold > 0.0:
+        emask = t_edge_sims >= edge_similarity_threshold
+        ts, tt = ts[emask], tt[emask]
     exploitation_history = all_runs[strategy][0]["history"]
     exploitation_iters = sorted({s["iteration"] for s in exploitation_history})
     exploitation_iter_to_cat = {
@@ -967,7 +976,7 @@ def compute_tmap_partition_layout(
     Returns
     -------
     tuple
-        ``(x, y, s, t)`` TMAP layout arrays as returned by
+        ``(x, y, s, t, edge_sims)`` TMAP layout arrays as returned by
         :func:`src.helpers.smiles_to_tmap`, with pool compounds first
         (rows ``0 .. len(df_pool) - 1``) and test compounds last
         (rows ``len(df_pool) .. len(df_pool) + len(df_test) - 1``).
@@ -984,6 +993,7 @@ def generate_tmap_partition_figures(
     results_dir: str | Path,
     *,
     split_suffix: str = "",
+    edge_similarity_threshold: float = 0.0,
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
@@ -1001,7 +1011,7 @@ def generate_tmap_partition_figures(
     df_test : pd.DataFrame
         Test DataFrame with a ``smiles`` column (Test partition).
     tmap_layout : tuple
-        Pre-computed TMAP layout ``(x, y, s, t)`` from
+        Pre-computed TMAP layout ``(x, y, s, t, edge_sims)`` from
         :func:`compute_tmap_partition_layout`, covering pool + test compounds in
         that order.
     results_dir : str or Path
@@ -1009,6 +1019,9 @@ def generate_tmap_partition_figures(
     split_suffix : str, optional
         String appended to output filenames before the extension, e.g.
         ``"_scaffold"``. Default is ``""`` (no suffix).
+    edge_similarity_threshold : float, optional
+        Minimum Tanimoto/Jaccard similarity for an MST edge to be drawn.
+        Default 0.0 (all edges drawn).
     xlim : tuple[float, float] or None, optional
         X-axis range override for the static matplotlib snapshot.
     ylim : tuple[float, float] or None, optional
@@ -1029,11 +1042,15 @@ def generate_tmap_partition_figures(
         title="Train / Test Partition (TMAP)",
         output_name=f"tmap_partition{split_suffix}",
         output_path=f"{results_dir}/",
+        edge_similarity_threshold=edge_similarity_threshold,
     )
 
     # Static matplotlib snapshot: pool=blue, test=orange
     print("Generating static TMAP partition snapshot...")
-    tx, ty, ts, tt = tmap_layout
+    tx, ty, ts, tt, t_edge_sims = tmap_layout
+    if edge_similarity_threshold > 0.0:
+        emask = t_edge_sims >= edge_similarity_threshold
+        ts, tt = ts[emask], tt[emask]
     train_color = (0.122, 0.467, 0.706, 0.6)  # tab10 blue
     test_color = (1.0, 0.498, 0.055, 0.9)  # tab10 orange
 
@@ -1143,6 +1160,15 @@ def main() -> None:
         help="pEC50 threshold above which a compound is counted as a hit in the "
         "hit discovery curve. Default: 7.0",
     )
+    parser.add_argument(
+        "--tmap-edge-threshold",
+        type=float,
+        default=0.0,
+        metavar="FLOAT",
+        help="Minimum Tanimoto/Jaccard similarity for a TMAP MST edge to be "
+        "drawn. Edges below this value are omitted from both the interactive "
+        "Faerun HTML and the static SVG snapshot. Default: 0.0 (all edges drawn).",
+    )
     args = parser.parse_args()
     cfg = load_config(args.config)
     results_dir = Path(cfg.results_path).expanduser()
@@ -1193,11 +1219,15 @@ def main() -> None:
         )
         tmap_layout = compute_tmap_layout(df_pool)
         generate_tmap_figures(
-            df_pool, all_runs, tmap_layout, results_dir, split_suffix=suffix
+            df_pool, all_runs, tmap_layout, results_dir,
+            split_suffix=suffix,
+            edge_similarity_threshold=args.tmap_edge_threshold,
         )
         tmap_partition_layout = compute_tmap_partition_layout(df_pool, df_test)
         generate_tmap_partition_figures(
-            df_pool, df_test, tmap_partition_layout, results_dir, split_suffix=suffix
+            df_pool, df_test, tmap_partition_layout, results_dir,
+            split_suffix=suffix,
+            edge_similarity_threshold=args.tmap_edge_threshold,
         )
 
     export_plotly_svgs(svg_queue)

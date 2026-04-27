@@ -726,7 +726,7 @@ def _build_iteration_categories(
 
 
 def plot_tmap_faerun(
-    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     smiles_list: list[str],
     selection_history: list[dict],
     output_name: str = "tmap_selection",
@@ -736,6 +736,7 @@ def plot_tmap_faerun(
     point_scale: float = 3.0,
     n_background: int = 0,
     background_point_scale: float = 1.0,
+    edge_similarity_threshold: float = 0.0,
 ) -> Faerun:
     """Faerun scatter plot of compound selections on a pre-computed TMAP layout.
 
@@ -747,8 +748,8 @@ def plot_tmap_faerun(
 
     Parameters
     ----------
-    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-        ``(x, y, s, t)`` as returned by ``helpers.smiles_to_tmap``, computed on
+    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ``(x, y, s, t, edge_sims)`` as returned by ``helpers.smiles_to_tmap``, computed on
         **all** molecules in the order ``pool_smiles + background_smiles``. When
         ``n_background > 0`` the last ``n_background`` entries of x/y correspond
         to background molecules; the MST edges (s, t) span all molecules so the
@@ -787,6 +788,10 @@ def plot_tmap_faerun(
     background_point_scale : float, optional
         Relative size of background scatter points. Default 1.0, smaller than
         the foreground default so background molecules recede visually.
+    edge_similarity_threshold : float, optional
+        Minimum Tanimoto/Jaccard similarity for an MST edge to be drawn.
+        Edges below this threshold are omitted from the tree layer. Default 0.0
+        (all edges drawn).
 
     Returns
     -------
@@ -796,7 +801,7 @@ def plot_tmap_faerun(
         notebook_height=500)`` to display inline in a Jupyter Notebook.
 
     """
-    x, y, s, t = tmap_layout
+    x, y, s, t, edge_sims = tmap_layout
 
     c, listed_cmap, legend_labels = _build_iteration_categories(
         selection_history, len(x), colormap
@@ -807,6 +812,10 @@ def plot_tmap_faerun(
     s_vals = np.full(len(x), point_scale, dtype=float)
     if n_background > 0:
         s_vals[n_pool:] = background_point_scale
+
+    if edge_similarity_threshold > 0.0:
+        mask = edge_sims >= edge_similarity_threshold
+        s, t = s[mask], t[mask]
 
     f = Faerun(
         title=title,
@@ -845,7 +854,7 @@ def plot_tmap_faerun(
 
 
 def plot_tmap_faerun_strategies(
-    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     smiles_list: list[str],
     strategies_histories: dict[str, list[dict]],
     output_name: str = "tmap_selection",
@@ -855,6 +864,7 @@ def plot_tmap_faerun_strategies(
     point_scale: float = 3.0,
     n_background: int = 0,
     background_point_scale: float = 1.0,
+    edge_similarity_threshold: float = 0.0,
 ) -> Faerun:
     """Faerun scatter plot of compound selections for multiple strategies with dropdown.
 
@@ -865,8 +875,8 @@ def plot_tmap_faerun_strategies(
 
     Parameters
     ----------
-    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-        ``(x, y, s, t)`` as returned by ``helpers.smiles_to_tmap``.
+    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ``(x, y, s, t, edge_sims)`` as returned by ``helpers.smiles_to_tmap``.
     smiles_list : list[str]
         SMILES strings in the same row order as ``tmap_layout``.
     strategies_histories : dict[str, list[dict]]
@@ -888,17 +898,24 @@ def plot_tmap_faerun_strategies(
         / ``smiles_list``. Default is 0.
     background_point_scale : float, optional
         Relative size of background scatter points. Default 1.0.
+    edge_similarity_threshold : float, optional
+        Minimum Tanimoto/Jaccard similarity for an MST edge to be drawn.
+        Edges below this threshold are omitted. Default 0.0 (all edges drawn).
 
     Returns
     -------
     Faerun
         Configured faerun instance.
     """
-    x, y, s, t = tmap_layout
+    x, y, s, t, edge_sims = tmap_layout
     n_pool = len(x) - n_background
     s_vals = np.full(len(x), point_scale, dtype=float)
     if n_background > 0:
         s_vals[n_pool:] = background_point_scale
+
+    if edge_similarity_threshold > 0.0:
+        mask = edge_sims >= edge_similarity_threshold
+        s, t = s[mask], t[mask]
 
     all_c: list[np.ndarray] = []
     all_cmaps: list[mcolors.ListedColormap] = []
@@ -953,7 +970,7 @@ def plot_tmap_faerun_strategies(
 
 
 def plot_tmap_faerun_partition(
-    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    tmap_layout: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     smiles_list: list[str],
     partition_labels: np.ndarray,
     output_name: str = "tmap_partition",
@@ -963,6 +980,7 @@ def plot_tmap_faerun_partition(
     test_color: tuple = (0.839, 0.153, 0.157, 1.0),
     train_singleton_color: tuple = (0.682, 0.780, 0.910, 1.0),
     test_singleton_color: tuple = (0.984, 0.604, 0.600, 1.0),
+    edge_similarity_threshold: float = 0.0,
     point_scale: float = 3.0,
 ) -> Faerun:
     """Faerun scatter plot of pool and test compounds on a pre-computed TMAP layout.
@@ -980,9 +998,9 @@ def plot_tmap_faerun_partition(
 
     Parameters
     ----------
-    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-        ``(x, y, s, t)`` as returned by ``helpers.smiles_to_tmap``, computed on
-        **all** molecules in the order ``pool_smiles + test_smiles``.
+    tmap_layout : tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ``(x, y, s, t, edge_sims)`` as returned by ``helpers.smiles_to_tmap``,
+        computed on **all** molecules in the order ``pool_smiles + test_smiles``.
     smiles_list : list[str]
         SMILES strings in the same row order as ``tmap_layout``.
     partition_labels : np.ndarray
@@ -1005,6 +1023,9 @@ def plot_tmap_faerun_partition(
     test_singleton_color : tuple, optional
         RGBA color for Test nodes with singleton scaffolds. Default is a light
         red (``#fb9a99``).
+    edge_similarity_threshold : float, optional
+        Minimum Tanimoto/Jaccard similarity for an MST edge to be drawn.
+        Edges below this threshold are omitted. Default 0.0 (all edges drawn).
     point_scale : float, optional
         Relative size of scatter points. Default 3.0.
 
@@ -1013,7 +1034,11 @@ def plot_tmap_faerun_partition(
     Faerun
         Configured faerun instance.
     """
-    x, y, s, t = tmap_layout
+    x, y, s, t, edge_sims = tmap_layout
+
+    if edge_similarity_threshold > 0.0:
+        mask = edge_sims >= edge_similarity_threshold
+        s, t = s[mask], t[mask]
 
     n_cats = int(partition_labels.max()) + 1
     all_colors = [train_color, test_color, train_singleton_color, test_singleton_color]
