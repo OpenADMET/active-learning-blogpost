@@ -475,7 +475,7 @@ def plot_gtm_selection_animation(
     """
     _ACTIVE_CURRENT = "rgba(220, 20, 60, 1.0)"
     _INACTIVE_CURRENT = "rgba(75, 75, 75, 0.45)"
-    _ACTIVE_PRIOR = "rgba(220, 20, 60, 0.55)"
+    _ACTIVE_PRIOR = "rgba(220, 20, 60, 1.0)"
     _INACTIVE_PRIOR = "rgba(75, 75, 75, 0.45)"
 
     def _split(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
