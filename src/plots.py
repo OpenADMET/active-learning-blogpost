@@ -474,9 +474,10 @@ def plot_gtm_selection_animation(
         an iteration slider. Call ``fig.show()`` to display inline in a Jupyter Notebook.
 
     """
-    _COLOR_UNQUERIED = "rgba(200, 200, 200, 0.4)"
-    _COLOR_INACTIVE  = "rgba(75, 75, 75, 0.45)"
-    _COLOR_ACTIVE    = "rgba(220, 20, 60, 1.0)"
+    _COLOR_UNQUERIED        = "rgba(200, 200, 200, 0.4)"
+    _COLOR_INACTIVE_PRIOR   = "rgba(75, 75, 75, 0.45)"
+    _COLOR_INACTIVE_CURRENT = "rgba(75, 75, 75, 1.0)"
+    _COLOR_ACTIVE           = "rgba(220, 20, 60, 1.0)"
     _SIZE_SMALL = 6
     _SIZE_LARGE = 12
 
@@ -507,17 +508,18 @@ def plot_gtm_selection_animation(
         trace_pool_idx: np.ndarray,
         queried_set: set,
         current_set: set,
-        base_color: str,
+        prior_color: str,
+        current_color: str,
     ) -> dict:
         """Return marker dict with per-point color and size arrays for one data trace."""
         colors: list[str] = []
         sizes:  list[int] = []
         for pi in trace_pool_idx:
             if pi in current_set:
-                colors.append(base_color)
+                colors.append(current_color)
                 sizes.append(_SIZE_LARGE)
             elif pi in queried_set:
-                colors.append(base_color)
+                colors.append(prior_color)
                 sizes.append(_SIZE_SMALL)
             else:
                 colors.append(_COLOR_UNQUERIED)
@@ -531,14 +533,16 @@ def plot_gtm_selection_animation(
                 go.Scatter(
                     mode="markers",
                     marker=_make_marker_arrays(
-                        inactive_pool_idx, queried_set, current_set, _COLOR_INACTIVE
+                        inactive_pool_idx, queried_set, current_set,
+                        _COLOR_INACTIVE_PRIOR, _COLOR_INACTIVE_CURRENT,
                     ),
                     hoverinfo="skip",
                 ),
                 go.Scatter(
                     mode="markers",
                     marker=_make_marker_arrays(
-                        active_pool_idx, queried_set, current_set, _COLOR_ACTIVE
+                        active_pool_idx, queried_set, current_set,
+                        _COLOR_ACTIVE, _COLOR_ACTIVE,
                     ),
                     hoverinfo="skip",
                 ),
@@ -618,7 +622,7 @@ def plot_gtm_selection_animation(
         ),
         go.Scatter(
             x=[None], y=[None], mode="markers",
-            marker=dict(color=_COLOR_INACTIVE, size=8, line=dict(color="white", width=0.5)),
+            marker=dict(color=_COLOR_INACTIVE_PRIOR, size=8, line=dict(color="white", width=0.5)),
             name="Inactive", hoverinfo="skip", showlegend=True,
         ),
         go.Scatter(
