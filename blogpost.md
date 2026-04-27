@@ -88,6 +88,9 @@ In each iteration $k$:
 
 Per iteration, we track number of active compounds "found" during the active learning campaign, MAE, Kendall's τ, and model uncertainty estimates.
 
+![][image11]  
+*Animation 1. Compound selections on the PXR pool embedded in two-dimensional GTM space, shown iteration by iteration for the **Exploitation** strategy with ChemProp (no ChEMBL). Each point is one pool compound projected onto a topographic map of chemical space learned from physicochemical descriptors. Light gray points have not yet been queried. Larger points were selected in the current iteration, with crimson marking actives (pEC50 ≥ 7.0) and dark gray marking inactives. After each iteration, selected points shrink back but retain their color as a permanent record of when they were queried. The spatial bias of **Exploitation** is visible as the campaign progressively concentrates selections in the high-activity region of chemical space.*
+
 ## Hit discovery
 
 The practical value of active learning is most directly measured by how quickly a campaign recovers actives. At 1.6%, the PXR diversity deck is sparse, leaving ample room for smart acquisition to outpace random sampling. The ASAP Mpro series, at 9.0%, is richer and provides a complementary scenario where even modest strategy advantages translate to large absolute hit count differences. Here we evaluate whether and to what degree different acquisition strategies accelerate active discovery, and whether trends hold across both dataset types.
