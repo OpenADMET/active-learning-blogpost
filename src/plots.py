@@ -431,13 +431,14 @@ def plot_gtm_selection_animation(
 ) -> go.Figure:
     """Animated Plotly scatter of compound selections on a pre-computed GTM embedding.
 
-    Renders one frame per active learning iteration with three layers:
-    gray background (full pool), dark-gray accumulation (all prior non-active
-    selections), and per-point coloring for current and past selections:
-    active compounds (activity >= hit_threshold) are shown in crimson; inactive
-    compounds are shown in dark gray. Current-iteration points are larger and
-    fully opaque; prior selections are normal size and semi-transparent.
-    Includes a slider and play/pause controls.
+    Renders one frame per active learning iteration with five layers:
+    light-gray background (full pool, static), prior inactive selections (semi-
+    transparent gray), prior active selections (semi-transparent crimson), current
+    inactive selections (gray, larger), and current active selections (crimson, larger,
+    topmost). Actives are always rendered on top. The legend shows three entries:
+    "Unqueried" (light gray), "Inactive" (gray), and "Active" (crimson).
+    Includes a slider and play/pause controls, plus a final "End" frame showing
+    the campaign end-state with no highlighted current selections.
 
     Parameters
     ----------
@@ -477,13 +478,17 @@ def plot_gtm_selection_animation(
     _ACTIVE_PRIOR = "rgba(220, 20, 60, 0.55)"
     _INACTIVE_PRIOR = "rgba(75, 75, 75, 0.45)"
 
-    def _colors(indices: np.ndarray, active_rgba: str, inactive_rgba: str) -> list[str]:
-        if pool_activity is None:
-            return [inactive_rgba] * max(len(indices), 1)
-        return [
-            active_rgba if pool_activity[idx] >= hit_threshold else inactive_rgba
-            for idx in indices
-        ] or [inactive_rgba]
+    def _split(indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Return (inactive_idx, active_idx) split by hit_threshold."""
+        if pool_activity is None or len(indices) == 0:
+            return indices, np.array([], dtype=int)
+        mask = pool_activity[indices] >= hit_threshold
+        return indices[~mask], indices[mask]
+
+    def _xy(idx: np.ndarray, coords: np.ndarray) -> tuple:
+        if len(idx) == 0:
+            return [None], [None]
+        return coords[idx, 0], coords[idx, 1]
 
     gtm_coords = np.asarray(gtm_coords)
     if background_gtm_coords is not None:
@@ -500,6 +505,44 @@ def plot_gtm_selection_animation(
         bg_x = gtm_coords[all_idx, 0]
         bg_y = gtm_coords[all_idx, 1]
 
+    def _make_frame(prior_idx, current_idx, name: str) -> go.Frame:
+        pi_idx, pa_idx = _split(prior_idx)
+        ci_idx, ca_idx = _split(current_idx)
+        return go.Frame(
+            data=[
+                # Trace 1: prior inactive
+                go.Scatter(
+                    x=_xy(pi_idx, gtm_coords)[0], y=_xy(pi_idx, gtm_coords)[1],
+                    mode="markers",
+                    marker=dict(color=_INACTIVE_PRIOR, size=7, line=dict(color="white", width=0.5)),
+                    hoverinfo="skip",
+                ),
+                # Trace 2: prior active (on top of prior inactive)
+                go.Scatter(
+                    x=_xy(pa_idx, gtm_coords)[0], y=_xy(pa_idx, gtm_coords)[1],
+                    mode="markers",
+                    marker=dict(color=_ACTIVE_PRIOR, size=7, line=dict(color="white", width=0.5)),
+                    hoverinfo="skip",
+                ),
+                # Trace 3: current inactive
+                go.Scatter(
+                    x=_xy(ci_idx, gtm_coords)[0], y=_xy(ci_idx, gtm_coords)[1],
+                    mode="markers",
+                    marker=dict(color=_INACTIVE_CURRENT, size=9, line=dict(color="white", width=0.5)),
+                    hoverinfo="skip",
+                ),
+                # Trace 4: current active (topmost layer)
+                go.Scatter(
+                    x=_xy(ca_idx, gtm_coords)[0], y=_xy(ca_idx, gtm_coords)[1],
+                    mode="markers",
+                    marker=dict(color=_ACTIVE_CURRENT, size=9, line=dict(color="white", width=0.5)),
+                    hoverinfo="skip",
+                ),
+            ],
+            traces=[1, 2, 3, 4],
+            name=name,
+        )
+
     frames = []
     slider_steps = []
 
@@ -509,47 +552,7 @@ def plot_gtm_selection_animation(
             [idx for s in selection_history[:i] for idx in s["selected_pool_indices"]],
             dtype=int,
         )
-
-        history_x = gtm_coords[prior_idx, 0] if len(prior_idx) > 0 else [None]
-        history_y = gtm_coords[prior_idx, 1] if len(prior_idx) > 0 else [None]
-
-        prior_colors = _colors(prior_idx, _ACTIVE_PRIOR, _INACTIVE_PRIOR)
-        current_colors = _colors(current_idx, _ACTIVE_CURRENT, _INACTIVE_CURRENT)
-
-        frame = go.Frame(
-            data=[
-                # Trace index 1: accumulated prior selections (dark gray or crimson for actives)
-                go.Scatter(
-                    x=history_x,
-                    y=history_y,
-                    mode="markers",
-                    marker=dict(
-                        color=prior_colors,
-                        size=7,
-                        line=dict(color="white", width=0.5),
-                    ),
-                    name="Prior selections",
-                    hoverinfo="skip",
-                ),
-                # Trace index 2: current iteration selections (dark gray or crimson for actives)
-                go.Scatter(
-                    x=gtm_coords[current_idx, 0],
-                    y=gtm_coords[current_idx, 1],
-                    mode="markers",
-                    marker=dict(
-                        color=current_colors,
-                        size=9,
-                        line=dict(color="white", width=0.5),
-                    ),
-                    name="Current iteration",
-                    hoverinfo="skip",
-                ),
-            ],
-            traces=[1, 2],
-            name=str(i),
-        )
-        frames.append(frame)
-
+        frames.append(_make_frame(prior_idx, current_idx, str(i)))
         slider_steps.append(
             dict(
                 method="animate",
@@ -565,39 +568,12 @@ def plot_gtm_selection_animation(
             )
         )
 
-    # Extra end-state frame: all selections shown as prior (visited), no current highlight
+    # Extra end-state frame: all selections as visited, no current highlight
     all_selected_idx = np.array(
         [idx for s in selection_history for idx in s["selected_pool_indices"]],
         dtype=int,
     )
-    end_prior_colors = _colors(all_selected_idx, _ACTIVE_PRIOR, _INACTIVE_PRIOR)
-    end_frame = go.Frame(
-        data=[
-            go.Scatter(
-                x=gtm_coords[all_selected_idx, 0] if len(all_selected_idx) > 0 else [None],
-                y=gtm_coords[all_selected_idx, 1] if len(all_selected_idx) > 0 else [None],
-                mode="markers",
-                marker=dict(
-                    color=end_prior_colors,
-                    size=7,
-                    line=dict(color="white", width=0.5),
-                ),
-                name="Prior selections",
-                hoverinfo="skip",
-            ),
-            go.Scatter(
-                x=[None],
-                y=[None],
-                mode="markers",
-                marker=dict(color=_INACTIVE_CURRENT, size=9, line=dict(color="white", width=0.5)),
-                name="Current iteration",
-                hoverinfo="skip",
-            ),
-        ],
-        traces=[1, 2],
-        name="end",
-    )
-    frames.append(end_frame)
+    frames.append(_make_frame(all_selected_idx, np.array([], dtype=int), "end"))
     slider_steps.append(
         dict(
             method="animate",
@@ -615,40 +591,55 @@ def plot_gtm_selection_animation(
 
     fig = go.Figure(
         data=[
-            # Trace 0: full compound pool background (gray, constant)
+            # Trace 0: full compound pool background (constant, not animated)
             go.Scatter(
                 x=bg_x,
                 y=bg_y,
                 mode="markers",
                 marker=dict(color="lightgray", size=5, opacity=0.5),
-                name="All compounds",
+                name="Unqueried",
                 hoverinfo="skip",
+                showlegend=True,
             ),
-            # Trace 1: prior selections placeholder (overwritten by each frame)
+            # Trace 1: prior inactive placeholder — legend entry "Inactive"
             go.Scatter(
                 x=[None],
                 y=[None],
                 mode="markers",
-                marker=dict(
-                    color=_INACTIVE_PRIOR,
-                    size=7,
-                    line=dict(color="white", width=0.5),
-                ),
-                name="Prior selections",
+                marker=dict(color=_INACTIVE_PRIOR, size=7, line=dict(color="white", width=0.5)),
+                name="Inactive",
                 hoverinfo="skip",
+                showlegend=True,
             ),
-            # Trace 2: current selection placeholder (overwritten by each frame)
+            # Trace 2: prior active placeholder — legend entry "Active"
             go.Scatter(
                 x=[None],
                 y=[None],
                 mode="markers",
-                marker=dict(
-                    color=_INACTIVE_CURRENT,
-                    size=9,
-                    line=dict(color="white", width=0.5),
-                ),
-                name="Current selection",
+                marker=dict(color=_ACTIVE_PRIOR, size=7, line=dict(color="white", width=0.5)),
+                name="Active",
                 hoverinfo="skip",
+                showlegend=True,
+            ),
+            # Trace 3: current inactive placeholder (no separate legend entry)
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(color=_INACTIVE_CURRENT, size=9, line=dict(color="white", width=0.5)),
+                name="Inactive",
+                hoverinfo="skip",
+                showlegend=False,
+            ),
+            # Trace 4: current active placeholder (no separate legend entry)
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(color=_ACTIVE_CURRENT, size=9, line=dict(color="white", width=0.5)),
+                name="Active",
+                hoverinfo="skip",
+                showlegend=False,
             ),
         ],
         frames=frames,
