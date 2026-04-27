@@ -426,13 +426,18 @@ def plot_gtm_selection_animation(
     selection_history: list[dict],
     title: str = "Active Learning Selection (GTM)",
     background_gtm_coords: np.ndarray | None = None,
+    pool_activity: np.ndarray | None = None,
+    hit_threshold: float = 7.0,
 ) -> go.Figure:
     """Animated Plotly scatter of compound selections on a pre-computed GTM embedding.
 
     Renders one frame per active learning iteration with three layers:
-    gray background (full pool), blue accumulation (all prior selections),
-    and red highlight (current iteration's selections). Includes a slider
-    and play/pause controls for use directly in a Jupyter Notebook.
+    gray background (full pool), dark-gray accumulation (all prior non-active
+    selections), and per-point coloring for current and past selections:
+    active compounds (activity >= hit_threshold) are shown in crimson; inactive
+    compounds are shown in dark gray. Current-iteration points are larger and
+    fully opaque; prior selections are normal size and semi-transparent.
+    Includes a slider and play/pause controls.
 
     Parameters
     ----------
@@ -451,6 +456,14 @@ def plot_gtm_selection_animation(
         molecules not part of the active learning pool. When provided, these
         points are merged into the static gray background trace and displayed
         identically to unselected pool compounds (light gray, small).
+    pool_activity : np.ndarray or None, optional
+        Activity values for all pool compounds, indexed by pool position.
+        When provided, compounds with activity >= ``hit_threshold`` are coloured
+        crimson; others are dark gray. When None, all selected compounds are
+        shown in dark gray.
+    hit_threshold : float, optional
+        Activity threshold above which a compound is considered a hit and
+        coloured crimson. Default 7.0.
 
     Returns
     -------
@@ -459,6 +472,19 @@ def plot_gtm_selection_animation(
         an iteration slider. Call ``fig.show()`` to display inline in a Jupyter Notebook.
 
     """
+    _ACTIVE_CURRENT = "rgba(220, 20, 60, 1.0)"
+    _INACTIVE_CURRENT = "rgba(75, 75, 75, 1.0)"
+    _ACTIVE_PRIOR = "rgba(220, 20, 60, 0.55)"
+    _INACTIVE_PRIOR = "rgba(75, 75, 75, 0.45)"
+
+    def _colors(indices: np.ndarray, active_rgba: str, inactive_rgba: str) -> list[str]:
+        if pool_activity is None:
+            return [inactive_rgba] * max(len(indices), 1)
+        return [
+            active_rgba if pool_activity[idx] >= hit_threshold else inactive_rgba
+            for idx in indices
+        ] or [inactive_rgba]
+
     gtm_coords = np.asarray(gtm_coords)
     if background_gtm_coords is not None:
         background_gtm_coords = np.asarray(background_gtm_coords)
@@ -487,31 +513,32 @@ def plot_gtm_selection_animation(
         history_x = gtm_coords[prior_idx, 0] if len(prior_idx) > 0 else [None]
         history_y = gtm_coords[prior_idx, 1] if len(prior_idx) > 0 else [None]
 
+        prior_colors = _colors(prior_idx, _ACTIVE_PRIOR, _INACTIVE_PRIOR)
+        current_colors = _colors(current_idx, _ACTIVE_CURRENT, _INACTIVE_CURRENT)
+
         frame = go.Frame(
             data=[
-                # Trace index 1: accumulated prior selections (blue)
+                # Trace index 1: accumulated prior selections (dark gray or crimson for actives)
                 go.Scatter(
                     x=history_x,
                     y=history_y,
                     mode="markers",
                     marker=dict(
-                        color="royalblue",
+                        color=prior_colors,
                         size=7,
-                        opacity=0.75,
                         line=dict(color="white", width=0.5),
                     ),
                     name="Prior selections",
                     hoverinfo="skip",
                 ),
-                # Trace index 2: current iteration selections (red)
+                # Trace index 2: current iteration selections (dark gray or crimson for actives)
                 go.Scatter(
                     x=gtm_coords[current_idx, 0],
                     y=gtm_coords[current_idx, 1],
                     mode="markers",
                     marker=dict(
-                        color="crimson",
+                        color=current_colors,
                         size=9,
-                        opacity=0.9,
                         line=dict(color="white", width=0.5),
                     ),
                     name="Current iteration",
@@ -555,9 +582,8 @@ def plot_gtm_selection_animation(
                 y=[None],
                 mode="markers",
                 marker=dict(
-                    color="royalblue",
+                    color=_INACTIVE_PRIOR,
                     size=7,
-                    opacity=0.75,
                     line=dict(color="white", width=0.5),
                 ),
                 name="Prior selections",
@@ -569,9 +595,8 @@ def plot_gtm_selection_animation(
                 y=[None],
                 mode="markers",
                 marker=dict(
-                    color="crimson",
+                    color=_INACTIVE_CURRENT,
                     size=9,
-                    opacity=0.9,
                     line=dict(color="white", width=0.5),
                 ),
                 name="Current selection",

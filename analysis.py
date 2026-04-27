@@ -695,6 +695,8 @@ def generate_gtm_figures(
     *,
     method: str = "Exploitation",
     split_suffix: str = "",
+    pool_activity: np.ndarray | None = None,
+    hit_threshold: float = 7.0,
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
@@ -723,6 +725,13 @@ def generate_gtm_figures(
     split_suffix : str, optional
         String appended to output filenames before the extension, e.g.
         ``"_scaffold"``. Default is ``""`` (no suffix).
+    pool_activity : np.ndarray or None, optional
+        Activity values for all pool compounds (indexed by pool position).
+        When provided, hit compounds (activity >= ``hit_threshold``) are
+        highlighted in crimson; others in dark gray.
+    hit_threshold : float, optional
+        Hit threshold passed to :func:`src.plots.plot_gtm_selection_animation`.
+        Default 7.0.
     xlim : tuple[float, float] or None, optional
         X-axis range override. Applied to both the Plotly figure and the
         matplotlib axes.
@@ -735,6 +744,8 @@ def generate_gtm_figures(
         gtm_coords=gtm_coords_pool,
         selection_history=all_runs[method][0]["history"],
         title=f"{method} Compound Selection in GTM Chemical Space",
+        pool_activity=pool_activity,
+        hit_threshold=hit_threshold,
     )
     fig.update_layout(autosize=False, width=800, height=800)
     if xlim is not None:
@@ -1175,7 +1186,10 @@ def main() -> None:
         gtm_coords_pool = split_data["gtm_coords_pool"]
 
         generate_gtm_figures(
-            all_runs, gtm_coords_pool, results_dir, split_suffix=suffix
+            all_runs, gtm_coords_pool, results_dir,
+            split_suffix=suffix,
+            pool_activity=df_pool["pEC50"].values,
+            hit_threshold=args.hit_threshold,
         )
         tmap_layout = compute_tmap_layout(df_pool)
         generate_tmap_figures(
