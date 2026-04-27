@@ -753,7 +753,11 @@ def generate_gtm_figures(
     if ylim is not None:
         fig.update_yaxes(range=list(ylim))
     fig.write_html(
-        f"{results_dir}/gtm_selection_animation_{method.lower()}{split_suffix}.html"
+        f"{results_dir}/gtm_selection_animation_{method.lower()}{split_suffix}.html",
+        animation_opts=dict(
+            frame=dict(duration=1200, redraw=True),
+            transition=dict(duration=400),
+        ),
     )
 
     # Static matplotlib snapshot: compounds coloured by first-acquired iteration
