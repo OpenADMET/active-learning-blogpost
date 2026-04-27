@@ -473,7 +473,7 @@ def plot_gtm_selection_animation(
 
     """
     _ACTIVE_CURRENT = "rgba(220, 20, 60, 1.0)"
-    _INACTIVE_CURRENT = "rgba(75, 75, 75, 1.0)"
+    _INACTIVE_CURRENT = "rgba(75, 75, 75, 0.45)"
     _ACTIVE_PRIOR = "rgba(220, 20, 60, 0.55)"
     _INACTIVE_PRIOR = "rgba(75, 75, 75, 0.45)"
 
@@ -564,6 +564,54 @@ def plot_gtm_selection_animation(
                 label=str(state["iteration"]),
             )
         )
+
+    # Extra end-state frame: all selections shown as prior (visited), no current highlight
+    all_selected_idx = np.array(
+        [idx for s in selection_history for idx in s["selected_pool_indices"]],
+        dtype=int,
+    )
+    end_prior_colors = _colors(all_selected_idx, _ACTIVE_PRIOR, _INACTIVE_PRIOR)
+    end_frame = go.Frame(
+        data=[
+            go.Scatter(
+                x=gtm_coords[all_selected_idx, 0] if len(all_selected_idx) > 0 else [None],
+                y=gtm_coords[all_selected_idx, 1] if len(all_selected_idx) > 0 else [None],
+                mode="markers",
+                marker=dict(
+                    color=end_prior_colors,
+                    size=7,
+                    line=dict(color="white", width=0.5),
+                ),
+                name="Prior selections",
+                hoverinfo="skip",
+            ),
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="markers",
+                marker=dict(color=_INACTIVE_CURRENT, size=9, line=dict(color="white", width=0.5)),
+                name="Current iteration",
+                hoverinfo="skip",
+            ),
+        ],
+        traces=[1, 2],
+        name="end",
+    )
+    frames.append(end_frame)
+    slider_steps.append(
+        dict(
+            method="animate",
+            args=[
+                ["end"],
+                dict(
+                    frame=dict(duration=600, redraw=True),
+                    mode="immediate",
+                    transition=dict(duration=200),
+                ),
+            ],
+            label="End",
+        )
+    )
 
     fig = go.Figure(
         data=[
