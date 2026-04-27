@@ -474,12 +474,12 @@ def plot_gtm_selection_animation(
         an iteration slider. Call ``fig.show()`` to display inline in a Jupyter Notebook.
 
     """
-    _COLOR_UNQUERIED        = "rgba(200, 200, 200, 0.4)"
-    _COLOR_INACTIVE_PRIOR   = "rgba(75, 75, 75, 0.45)"
-    _COLOR_INACTIVE_CURRENT = "rgba(75, 75, 75, 1.0)"
-    _COLOR_ACTIVE           = "rgba(220, 20, 60, 1.0)"
-    _SIZE_SMALL = 6
-    _SIZE_LARGE = 12
+    _COLOR_POOL_BG  = "rgb(200, 200, 200)"   # static background: all pool compounds
+    _COLOR_INACTIVE = "rgb(75, 75, 75)"       # queried inactive: dark gray, fully opaque
+    _COLOR_ACTIVE   = "rgb(220, 20, 60)"      # queried active: crimson, fully opaque
+    _SIZE_INVISIBLE = 0    # unqueried on data traces (shown by bg trace instead)
+    _SIZE_SMALL     = 6    # prior selections
+    _SIZE_LARGE     = 12   # current-iteration selections
 
     gtm_coords = np.asarray(gtm_coords)
     if background_gtm_coords is not None:
@@ -497,34 +497,29 @@ def plot_gtm_selection_animation(
     inactive_pool_idx = np.where(~active_pool_mask)[0]
     active_pool_idx   = np.where(active_pool_mask)[0]
 
-    # Animated trace indices depend on whether a background trace is prepended.
-    has_bg = background_gtm_coords is not None
-    # Layout: [optional bg] + [3 legend-only dummies] + [inactive data] + [active data]
-    _inactive_trace = 4 if has_bg else 3
-    _active_trace   = 5 if has_bg else 4
-    _animated       = [_inactive_trace, _active_trace]
+    # Trace layout (fixed): [bg] + [3 legend-only dummies] + [inactive data] + [active data]
+    _animated = [4, 5]
 
     def _make_marker_arrays(
         trace_pool_idx: np.ndarray,
         queried_set: set,
         current_set: set,
-        prior_color: str,
-        current_color: str,
+        color: str,
     ) -> dict:
-        """Return marker dict with per-point color and size arrays for one data trace."""
-        colors: list[str] = []
-        sizes:  list[int] = []
+        """Return marker dict with per-point size arrays for one data trace.
+
+        Unqueried points use size=0 (invisible); the static background trace
+        provides their light-gray appearance.  All colors are fully opaque.
+        """
+        sizes: list[int] = []
         for pi in trace_pool_idx:
             if pi in current_set:
-                colors.append(current_color)
                 sizes.append(_SIZE_LARGE)
             elif pi in queried_set:
-                colors.append(prior_color)
                 sizes.append(_SIZE_SMALL)
             else:
-                colors.append(_COLOR_UNQUERIED)
-                sizes.append(_SIZE_SMALL)
-        return dict(color=colors, size=sizes, line=dict(color="white", width=0.5))
+                sizes.append(_SIZE_INVISIBLE)
+        return dict(color=color, size=sizes, line=dict(color="white", width=0.5))
 
     def _make_frame(prior_set: set, current_set: set, name: str) -> go.Frame:
         queried_set = prior_set | current_set
@@ -533,16 +528,14 @@ def plot_gtm_selection_animation(
                 go.Scatter(
                     mode="markers",
                     marker=_make_marker_arrays(
-                        inactive_pool_idx, queried_set, current_set,
-                        _COLOR_INACTIVE_PRIOR, _COLOR_INACTIVE_CURRENT,
+                        inactive_pool_idx, queried_set, current_set, _COLOR_INACTIVE
                     ),
                     hoverinfo="skip",
                 ),
                 go.Scatter(
                     mode="markers",
                     marker=_make_marker_arrays(
-                        active_pool_idx, queried_set, current_set,
-                        _COLOR_ACTIVE, _COLOR_ACTIVE,
+                        active_pool_idx, queried_set, current_set, _COLOR_ACTIVE
                     ),
                     hoverinfo="skip",
                 ),
@@ -591,38 +584,42 @@ def plot_gtm_selection_animation(
         )
     )
 
-    def _initial_markers(trace_pool_idx: np.ndarray) -> dict:
-        n = len(trace_pool_idx)
+    def _initial_markers(color: str, n: int) -> dict:
         return dict(
-            color=[_COLOR_UNQUERIED] * n,
-            size=[_SIZE_SMALL] * n,
+            color=color,
+            size=[_SIZE_INVISIBLE] * n,
             line=dict(color="white", width=0.5),
         )
 
-    figure_data = []
+    # Static background: all pool compounds + optional background molecules shown as
+    # light gray.  These never animate; the data traces render on top when queried.
+    bg_x = list(gtm_coords[:, 0])
+    bg_y = list(gtm_coords[:, 1])
+    if background_gtm_coords is not None:
+        bg_x = np.concatenate([bg_x, background_gtm_coords[:, 0]])
+        bg_y = np.concatenate([bg_y, background_gtm_coords[:, 1]])
 
-    if has_bg:
-        figure_data.append(
-            go.Scatter(
-                x=background_gtm_coords[:, 0],
-                y=background_gtm_coords[:, 1],
-                mode="markers",
-                marker=dict(color=_COLOR_UNQUERIED, size=_SIZE_SMALL),
-                hoverinfo="skip",
-                showlegend=False,
-            )
+    figure_data = [
+        go.Scatter(
+            x=bg_x,
+            y=bg_y,
+            mode="markers",
+            marker=dict(color=_COLOR_POOL_BG, size=5),
+            hoverinfo="skip",
+            showlegend=False,
         )
+    ]
 
-    # Three legend-only dummy traces (x=[None] keeps them out of the plot area)
+    # Three legend-only dummy traces
     figure_data.extend([
         go.Scatter(
             x=[None], y=[None], mode="markers",
-            marker=dict(color=_COLOR_UNQUERIED, size=8, opacity=0.9),
+            marker=dict(color=_COLOR_POOL_BG, size=8),
             name="Unqueried", hoverinfo="skip", showlegend=True,
         ),
         go.Scatter(
             x=[None], y=[None], mode="markers",
-            marker=dict(color=_COLOR_INACTIVE_PRIOR, size=8, line=dict(color="white", width=0.5)),
+            marker=dict(color=_COLOR_INACTIVE, size=8, line=dict(color="white", width=0.5)),
             name="Inactive", hoverinfo="skip", showlegend=True,
         ),
         go.Scatter(
@@ -632,13 +629,14 @@ def plot_gtm_selection_animation(
         ),
     ])
 
-    # Permanent data traces: all pool compounds, initially all unqueried
+    # Permanent data traces: all pool compounds, initially size=0 (invisible).
+    # The static bg trace provides their light-gray unqueried appearance.
     figure_data.append(
         go.Scatter(
             x=gtm_coords[inactive_pool_idx, 0],
             y=gtm_coords[inactive_pool_idx, 1],
             mode="markers",
-            marker=_initial_markers(inactive_pool_idx),
+            marker=_initial_markers(_COLOR_INACTIVE, len(inactive_pool_idx)),
             hoverinfo="skip",
             showlegend=False,
         )
@@ -648,7 +646,7 @@ def plot_gtm_selection_animation(
             x=gtm_coords[active_pool_idx, 0],
             y=gtm_coords[active_pool_idx, 1],
             mode="markers",
-            marker=_initial_markers(active_pool_idx),
+            marker=_initial_markers(_COLOR_ACTIVE, len(active_pool_idx)),
             hoverinfo="skip",
             showlegend=False,
         )
