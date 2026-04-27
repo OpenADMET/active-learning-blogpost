@@ -557,7 +557,7 @@ def plot_gtm_selection_animation(
                 args=[
                     [str(i)],
                     dict(
-                        frame=dict(duration=600, redraw=True),
+                        frame=dict(duration=1200, redraw=True),
                         mode="immediate",
                         transition=dict(duration=200),
                     ),
@@ -575,7 +575,7 @@ def plot_gtm_selection_animation(
             args=[
                 ["end"],
                 dict(
-                    frame=dict(duration=600, redraw=True),
+                    frame=dict(duration=1200, redraw=True),
                     mode="immediate",
                     transition=dict(duration=200),
                 ),
@@ -678,7 +678,7 @@ def plot_gtm_selection_animation(
                             args=[
                                 None,
                                 dict(
-                                    frame=dict(duration=600, redraw=True),
+                                    frame=dict(duration=1200, redraw=True),
                                     fromcurrent=True,
                                     loop=True,
                                     transition=dict(duration=200),
