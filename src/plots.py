@@ -776,6 +776,9 @@ def plot_tmap_faerun(
     n_background: int = 0,
     background_point_scale: float = 1.0,
     edge_similarity_threshold: float = 0.0,
+    pool_activity: np.ndarray | None = None,
+    hit_threshold: float = 7.0,
+    active_scale_multiplier: float = 1.5,
 ) -> Faerun:
     """Faerun scatter plot of compound selections on a pre-computed TMAP layout.
 
@@ -831,6 +834,17 @@ def plot_tmap_faerun(
         Minimum Tanimoto/Jaccard similarity for an MST edge to be drawn.
         Edges below this threshold are omitted from the tree layer. Default 0.0
         (all edges drawn).
+    pool_activity : np.ndarray or None, optional
+        Activity values (length = number of pool compounds, i.e.
+        ``len(smiles_list) - n_background``). When provided, compounds with
+        activity >= ``hit_threshold`` are rendered at
+        ``point_scale * active_scale_multiplier`` rather than ``point_scale``.
+    hit_threshold : float, optional
+        Activity threshold above which a compound is considered active.
+        Default 7.0.
+    active_scale_multiplier : float, optional
+        Size multiplier applied to active compounds relative to ``point_scale``.
+        Default 1.5 (actives appear 50% larger than inactives).
 
     Returns
     -------
@@ -851,6 +865,9 @@ def plot_tmap_faerun(
     s_vals = np.full(len(x), point_scale, dtype=float)
     if n_background > 0:
         s_vals[n_pool:] = background_point_scale
+    if pool_activity is not None:
+        active_mask = pool_activity[:n_pool] >= hit_threshold
+        s_vals[:n_pool][active_mask] *= active_scale_multiplier
 
     if edge_similarity_threshold > 0.0:
         mask = edge_sims >= edge_similarity_threshold
@@ -904,6 +921,9 @@ def plot_tmap_faerun_strategies(
     n_background: int = 0,
     background_point_scale: float = 1.0,
     edge_similarity_threshold: float = 0.0,
+    pool_activity: np.ndarray | None = None,
+    hit_threshold: float = 7.0,
+    active_scale_multiplier: float = 1.5,
 ) -> Faerun:
     """Faerun scatter plot of compound selections for multiple strategies with dropdown.
 
@@ -940,6 +960,17 @@ def plot_tmap_faerun_strategies(
     edge_similarity_threshold : float, optional
         Minimum Tanimoto/Jaccard similarity for an MST edge to be drawn.
         Edges below this threshold are omitted. Default 0.0 (all edges drawn).
+    pool_activity : np.ndarray or None, optional
+        Activity values (length = number of pool compounds). When provided,
+        compounds with activity >= ``hit_threshold`` are rendered at
+        ``point_scale * active_scale_multiplier``. Activity is strategy-
+        independent, so one size array is shared across all strategy series.
+    hit_threshold : float, optional
+        Activity threshold above which a compound is considered active.
+        Default 7.0.
+    active_scale_multiplier : float, optional
+        Size multiplier for active compounds relative to ``point_scale``.
+        Default 1.5.
 
     Returns
     -------
@@ -951,6 +982,9 @@ def plot_tmap_faerun_strategies(
     s_vals = np.full(len(x), point_scale, dtype=float)
     if n_background > 0:
         s_vals[n_pool:] = background_point_scale
+    if pool_activity is not None:
+        active_mask = pool_activity[:n_pool] >= hit_threshold
+        s_vals[:n_pool][active_mask] *= active_scale_multiplier
 
     if edge_similarity_threshold > 0.0:
         mask = edge_sims >= edge_similarity_threshold

@@ -848,6 +848,8 @@ def generate_tmap_figures(
     strategy: str = "Exploitation",
     split_suffix: str = "",
     edge_similarity_threshold: float = 0.0,
+    pool_activity: np.ndarray | None = None,
+    hit_threshold: float = 7.0,
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
 ) -> None:
@@ -879,6 +881,12 @@ def generate_tmap_figures(
         Minimum Tanimoto/Jaccard similarity for an MST edge to be drawn in
         both the Faerun HTML and the static matplotlib snapshot. Default 0.0
         (all edges drawn).
+    pool_activity : np.ndarray or None, optional
+        Activity values for pool compounds (length = len(df_pool)). When
+        provided, actives (activity >= hit_threshold) are rendered larger in
+        the Faerun interactive plot.
+    hit_threshold : float, optional
+        Activity threshold for the active-size bump. Default 7.0.
     xlim : tuple[float, float] or None, optional
         X-axis range override for the static matplotlib snapshot.
     ylim : tuple[float, float] or None, optional
@@ -895,6 +903,8 @@ def generate_tmap_figures(
         output_name=f"tmap_selection{split_suffix}",
         output_path=f"{results_dir}/",
         edge_similarity_threshold=edge_similarity_threshold,
+        pool_activity=pool_activity,
+        hit_threshold=hit_threshold,
     )
 
     # Static matplotlib snapshot: compounds coloured by first-acquired iteration
@@ -1222,6 +1232,8 @@ def main() -> None:
             df_pool, all_runs, tmap_layout, results_dir,
             split_suffix=suffix,
             edge_similarity_threshold=args.tmap_edge_threshold,
+            pool_activity=df_pool["pEC50"].values,
+            hit_threshold=args.hit_threshold,
         )
         tmap_partition_layout = compute_tmap_partition_layout(df_pool, df_test)
         generate_tmap_partition_figures(
