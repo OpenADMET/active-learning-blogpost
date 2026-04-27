@@ -134,7 +134,7 @@ ChEMBL pretraining provides a useful accuracy prior at campaign start. CheMeleon
 ![][image6]  
 *Figure 4\. PXR dataset Kendall's τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
 
-Kendall’s τ reinforces these conclusions. ChemProp reaches τ ≈ 0.49 and CheMeleon reaches τ ≈ 0.52 by mid-campaign, with strategy bands largely overlapping within each model. **Exploitation** produces the lowest τ for ChemProp (approximately 0.42 at n = 900, p=0.0006 vs **Random**), while CheMeleon strategies are more tightly clustered (0.49 to 0.50), confirming that a biased labeled set depresses rank-ordering performance more severely for a randomly initialized model.
+Kendall’s τ reinforces these conclusions. ChemProp reaches τ ≈ 0.49 and CheMeleon reaches τ ≈ 0.52 by mid-campaign, with strategy bands largely overlapping within each model. **Exploitation** produces the lowest τ for ChemProp (approximately 0.42 at n = 900, p=0.0006 vs **Random**), while CheMeleon strategies cluster tightly between 0.49 and 0.50. Skewing the labeled pool toward actives therefore hurts ranking ability much more for ChemProp than for CheMeleon, likely because pretrained representations already encode broad chemical variation and are less distorted by a narrow training distribution.
 
 ### SARS-CoV-2 Mpro
 
