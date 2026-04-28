@@ -1996,7 +1996,7 @@ def plot_predicted_distribution_animation(
         )
 
         # Horizontal gap bracket: text label on the LEFT side of the bar
-        gap_y = y_max * 0.82
+        gap_y = y_max * 0.95
         trace_gap = go.Scatter(
             x=[mean_nonhit, mean_hit],
             y=[gap_y, gap_y],
@@ -2035,7 +2035,7 @@ def plot_predicted_distribution_animation(
             ),
             xaxis=dict(
                 title=f"Committee mean predicted {activity_col} (test set)",
-                range=[x_min - 0.1, x_max + 0.1],
+                range=[0, 10],
                 showgrid=True,
                 gridcolor="#eeeeee",
                 zeroline=False,
