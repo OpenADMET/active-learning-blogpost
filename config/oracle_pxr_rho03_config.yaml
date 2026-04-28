@@ -47,3 +47,4 @@ oracle:
   final_uncertainty_rho: 0.3
   initial_shrinkage: 0.45
   final_shrinkage: 0.45
+  noise_heteroscedasticity: 0.0

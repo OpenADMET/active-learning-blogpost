@@ -256,7 +256,7 @@ def _build_tier_comparison_figure(
         Faceted Plotly figure.
     """
     n_tiers = len(tier_names)
-    n_cols = 2
+    n_cols = 3
     n_rows = (n_tiers + n_cols - 1) // n_cols
 
     from plotly.subplots import make_subplots  # noqa: PLC0415
@@ -366,7 +366,7 @@ def _build_hit_comparison_figure(
     from plotly.subplots import make_subplots  # noqa: PLC0415
 
     n_tiers = len(tier_names)
-    n_cols = 2
+    n_cols = 3
     n_rows = (n_tiers + n_cols - 1) // n_cols
     fig = make_subplots(
         rows=n_rows,

@@ -1,12 +1,14 @@
-# Oracle config for ASAP Mpro — rho=0.0 (uncertainty = pure noise)
+# Oracle config for ASAP Mpro — rho=0.4 (moderate uncertainty correlation)
 # Strategies: EI, UCB, Random, Exploitation, Exploration (no Diversity)
-# MAE fixed at 0.4 across all constant-rho tiers (ASAP dataset is smaller, better MAE feasible).
+# noise_heteroscedasticity=0.6: empirically calibrated from real ChemProp/CheMeleon
+# runs; ASAP Q4 (>7.46) compounds show ~2.2-3.6x higher residuals than Q1 (<5.06).
+# het=0.6 targets ~2.2x Q4/Q1 noise ratio, matching CheMeleon level.
 
 data:
   dataset_path: data/asap_potency.csv
   dataset_smiles_col: CXSMILES
   dataset_activity_col: "pIC50 (SARS-CoV-2 Mpro)"
-  results_path: results/oracle_asap_rho00
+  results_path: results/oracle_asap_rho04
   dataset_split_seed: 43
   gtm_seed: 1234
   setup_results_path: results/asap_chemprop
@@ -44,8 +46,8 @@ clustering:
 oracle:
   initial_mae: 0.6
   final_mae: 0.6
-  initial_uncertainty_rho: 0.0
-  final_uncertainty_rho: 0.0
+  initial_uncertainty_rho: 0.4
+  final_uncertainty_rho: 0.4
   initial_shrinkage: 0.45
   final_shrinkage: 0.45
   noise_heteroscedasticity: 0.6

@@ -54,6 +54,13 @@ class SyntheticConfig:
     final_shrinkage : float
         Shrinkage factor at the final iteration (typically higher than
         initial_shrinkage, mirroring improved extrapolation with more data).
+    noise_heteroscedasticity : float
+        Scales noise amplitude by distance above the global mean.  Empirically
+        calibrated from real ChemProp/CheMeleon run residuals: ASAP Mpro shows
+        strong positive heteroscedasticity (Spearman ρ≈0.60, Q4/Q1=3.6×);
+        PXR shows no significant positive heteroscedasticity (ρ≈−0.09).
+        Set to 0.0 for PXR configs; ~0.6 for ASAP configs.
+        Formula: ``noise_scale = 1 + het * max(y_true − μ, 0) / σ_y``.
     """
 
     initial_mae: float
@@ -62,6 +69,7 @@ class SyntheticConfig:
     final_uncertainty_rho: float
     initial_shrinkage: float = 1.0
     final_shrinkage: float = 1.0
+    noise_heteroscedasticity: float = 0.0
 
 
 def load_synthetic_config(path: str | Path) -> SyntheticConfig:
@@ -126,6 +134,7 @@ def load_synthetic_config(path: str | Path) -> SyntheticConfig:
 
     initial_shrinkage = _get_float_optional("initial_shrinkage", 1.0)
     final_shrinkage = _get_float_optional("final_shrinkage", 1.0)
+    noise_heteroscedasticity = _get_float_optional("noise_heteroscedasticity", 0.0)
 
     if initial_mae is not None and initial_mae < 0:
         errors.append(f"[oracle] 'initial_mae' must be >= 0, got {initial_mae}")
@@ -137,6 +146,10 @@ def load_synthetic_config(path: str | Path) -> SyntheticConfig:
     for name, val in [("initial_shrinkage", initial_shrinkage), ("final_shrinkage", final_shrinkage)]:
         if not (0.0 <= val <= 1.0):
             errors.append(f"[oracle] '{name}' must be in [0, 1], got {val}")
+    if noise_heteroscedasticity < 0.0:
+        errors.append(
+            f"[oracle] 'noise_heteroscedasticity' must be >= 0, got {noise_heteroscedasticity}"
+        )
 
     if errors:
         raise ValueError(
@@ -153,6 +166,7 @@ def load_synthetic_config(path: str | Path) -> SyntheticConfig:
         final_uncertainty_rho=final_rho,
         initial_shrinkage=initial_shrinkage,
         final_shrinkage=final_shrinkage,
+        noise_heteroscedasticity=noise_heteroscedasticity,
     )
 
 
@@ -196,8 +210,10 @@ class SyntheticOracle:
         self.oracle_cfg = oracle_cfg
         self.k_iter = max(k_iter, 1)
         self.seed = seed
-        # Global mean across all oracle-known compounds; used as shrinkage anchor.
-        self.y_global_mean = float(np.mean(list(smiles_to_y.values())))
+        # Global mean and std across all oracle-known compounds.
+        y_vals = np.array(list(smiles_to_y.values()), dtype=float)
+        self.y_global_mean = float(np.mean(y_vals))
+        self.y_global_std = float(np.std(y_vals)) or 1.0  # guard div-by-zero
 
     # ------------------------------------------------------------------
     # Parameter ramping helpers
@@ -265,6 +281,7 @@ class SyntheticOracle:
         mae = self._mae_at(iteration)
         rho = self._rho_at(iteration)
         shrinkage = self._shrinkage_at(iteration)
+        het = self.oracle_cfg.noise_heteroscedasticity
 
         # Look up true labels
         y_true = np.array([self.smiles_to_y[s] for s in smiles_list], dtype=float)
@@ -274,8 +291,14 @@ class SyntheticOracle:
         # underpredicted, mirroring real ML models trained on limited data.
         y_biased = self.y_global_mean + shrinkage * (y_true - self.y_global_mean)
 
-        # Uniform noise: Uniform(-2*mae, 2*mae) has E[|X|] = mae
-        noise = rng.uniform(-2.0 * mae, 2.0 * mae, size=n)
+        # Heteroscedastic noise: amplitude scales with distance above the global
+        # mean, simulating larger errors for rare high-activity compounds that have
+        # few training examples.  Empirically calibrated from real run residuals:
+        # ASAP shows Q4/Q1 residual ratio ~2–3.6×; PXR shows no significant
+        # positive heteroscedasticity (het=0 appropriate for PXR).
+        above_mean = np.maximum(y_true - self.y_global_mean, 0.0)
+        noise_scale = 1.0 + het * above_mean / self.y_global_std
+        noise = rng.uniform(-1.0, 1.0, size=n) * 2.0 * mae * noise_scale
         y_pred = y_biased + noise
 
         # Sigma with target Spearman rho vs |residuals| (includes bias + noise)

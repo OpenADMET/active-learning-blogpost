@@ -1,19 +1,20 @@
-# Oracle config for ASAP Mpro — rho=0.0 (uncertainty = pure noise)
+# Oracle config for PXR — rho=0.2 (weak uncertainty correlation)
 # Strategies: EI, UCB, Random, Exploitation, Exploration (no Diversity)
-# MAE fixed at 0.4 across all constant-rho tiers (ASAP dataset is smaller, better MAE feasible).
+# MAE fixed at 0.6 across all constant-rho tiers.
+# noise_heteroscedasticity=0.0: PXR residuals show no significant positive
+# heteroscedasticity with activity (Spearman rho≈-0.09 in real runs).
 
 data:
-  dataset_path: data/asap_potency.csv
-  dataset_smiles_col: CXSMILES
-  dataset_activity_col: "pIC50 (SARS-CoV-2 Mpro)"
-  results_path: results/oracle_asap_rho00
+  dataset_path: data/pxr_challenge_train.csv
+  dataset_smiles_col: SMILES
+  dataset_activity_col: pEC50
+  results_path: results/oracle_pxr_rho02
   dataset_split_seed: 43
   gtm_seed: 1234
-  setup_results_path: results/asap_chemprop
+  setup_results_path: results/pxr_chemprop
   seed_data_path: null
   seed_smiles_col: SMILES
   seed_activity_col: pEC50
-  predefined_split_col: Set
 
 active_learning:
   strategies:
@@ -23,9 +24,9 @@ active_learning:
     - Exploitation
     - Exploration
   split_types:
-    - predefined
+    - random
   seeds: [42, 43, 44, 45, 46]
-  k_iter: 7
+  k_iter: 32
   query_size: 100
   n_start: 100
 
@@ -44,8 +45,8 @@ clustering:
 oracle:
   initial_mae: 0.6
   final_mae: 0.6
-  initial_uncertainty_rho: 0.0
-  final_uncertainty_rho: 0.0
+  initial_uncertainty_rho: 0.2
+  final_uncertainty_rho: 0.2
   initial_shrinkage: 0.45
   final_shrinkage: 0.45
-  noise_heteroscedasticity: 0.6
+  noise_heteroscedasticity: 0.0
