@@ -1,6 +1,6 @@
 # Oracle config for PXR — rho=0.4 (moderate uncertainty correlation)
 # Strategies: EI, UCB, Random, Exploitation, Exploration (no Diversity)
-# MAE fixed at 0.6 across all constant-rho tiers.
+# MAE ramps 0.9→0.6 across all constant-rho tiers.
 # noise_heteroscedasticity=0.0: PXR residuals show no significant positive
 # heteroscedasticity with activity (Spearman rho≈-0.09 in real runs).
 
@@ -43,7 +43,7 @@ clustering:
   butina_cutoff: 0.65
 
 oracle:
-  initial_mae: 0.6
+  initial_mae: 0.9
   final_mae: 0.6
   initial_uncertainty_rho: 0.4
   final_uncertainty_rho: 0.4

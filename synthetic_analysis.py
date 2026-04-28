@@ -388,6 +388,27 @@ def _build_hit_comparison_figure(
         lc_long = per_split_data[split_key]["learning_curve_long"]
         df_pool = per_split_data[split_key]["df_pool"]
 
+        max_hits = int((df_pool["pEC50"] >= hit_threshold).sum())
+        pool_size = len(df_pool)
+        axis_idx = (row - 1) * n_cols + (col - 1)
+        ax_suffix = "" if axis_idx == 0 else str(axis_idx + 1)
+
+        # Random acquisition baseline (diagonal ramp).
+        fig.add_trace(
+            go.Scatter(
+                x=[0, pool_size],
+                y=[0, max_hits],
+                mode="lines",
+                name="Random (expected)",
+                legendgroup="__random_baseline__",
+                showlegend=(tier_idx == 0),
+                line=dict(color="#888888", width=1.2, dash="dash"),
+                hoverinfo="skip",
+            ),
+            row=row,
+            col=col,
+        )
+
         for strat_idx, strategy in enumerate(strategies):
             color = STRATEGY_COLORS.get(strategy, "#888888")
             s_pool = pool_hist[pool_hist["strategy"] == strategy]
@@ -454,6 +475,29 @@ def _build_hit_comparison_figure(
                 row=row,
                 col=col,
             )
+
+        # Hit ceiling reference line (per subplot).
+        fig.add_shape(
+            type="line",
+            x0=0,
+            x1=1,
+            y0=max_hits,
+            y1=max_hits,
+            xref=f"x{ax_suffix} domain",
+            yref=f"y{ax_suffix}",
+            line=dict(color="black", width=1.2, dash="dash"),
+        )
+        fig.add_annotation(
+            x=1,
+            y=max_hits,
+            xref=f"x{ax_suffix} domain",
+            yref=f"y{ax_suffix}",
+            text=f"Total hits in pool ({max_hits})",
+            showarrow=False,
+            xanchor="right",
+            yanchor="bottom",
+            font=dict(size=11),
+        )
 
     fig.update_layout(
         height=340 * n_rows + 80,

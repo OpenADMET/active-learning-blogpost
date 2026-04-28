@@ -44,7 +44,7 @@ clustering:
   butina_cutoff: 0.65
 
 oracle:
-  initial_mae: 0.6
+  initial_mae: 0.9
   final_mae: 0.6
   initial_uncertainty_rho: 0.8
   final_uncertainty_rho: 0.8

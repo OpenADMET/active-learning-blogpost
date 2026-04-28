@@ -1,6 +1,6 @@
 # Oracle config for ASAP Mpro — rho=0.0 (uncertainty = pure noise)
 # Strategies: EI, UCB, Random, Exploitation, Exploration (no Diversity)
-# MAE fixed at 0.4 across all constant-rho tiers (ASAP dataset is smaller, better MAE feasible).
+# MAE ramps 0.9→0.6 across all constant-rho tiers.
 
 data:
   dataset_path: data/asap_potency.csv
@@ -42,7 +42,7 @@ clustering:
   butina_cutoff: 0.65
 
 oracle:
-  initial_mae: 0.6
+  initial_mae: 0.9
   final_mae: 0.6
   initial_uncertainty_rho: 0.0
   final_uncertainty_rho: 0.0
