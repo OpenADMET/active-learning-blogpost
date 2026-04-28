@@ -1206,7 +1206,7 @@ def generate_predicted_distribution_animation(
                 seed=seed,
             )
             out_path = results_dir / f"predicted_distribution_{strategy}_seed{seed}.html"
-            fig.write_html(str(out_path))
+            fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)
             print(f"  saved {out_path}")
 
 

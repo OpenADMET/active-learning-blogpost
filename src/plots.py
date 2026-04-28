@@ -15,6 +15,16 @@ import plotly.graph_objects as go
 from faerun import Faerun
 from plotly.subplots import make_subplots
 
+# Animation timing for plot_predicted_distribution_animation.
+# Used by the Play button args and by write_html(animation_opts=...) so both paths
+# share the same frame duration and transition speed.
+_DIST_FRAME_MS: int = 600
+_DIST_TRANSITION_MS: int = 100
+DIST_ANIMATION_OPTS: dict = dict(
+    frame=dict(duration=_DIST_FRAME_MS, redraw=True),
+    transition=dict(duration=_DIST_TRANSITION_MS),
+)
+
 
 def plot_learning_curve_with_bands(
     learning_curve_df: pd.DataFrame,
@@ -1893,9 +1903,9 @@ def plot_predicted_distribution_animation(
     n_hits = int(hit_mask.sum())
     n_nonhits = int(nonhit_mask.sum())
 
-    # Colour palette: green for hits, gray for non-hits
-    _HIT_COLOR = "rgba(33, 150, 83, 0.55)"
-    _HIT_LINE = "rgba(33, 150, 83, 1.0)"
+    # Colour palette: crimson for hits (matches GTM active color), gray for non-hits
+    _HIT_COLOR = "rgba(220, 20, 60, 0.55)"
+    _HIT_LINE = "rgba(220, 20, 60, 1.0)"
     _NONHIT_COLOR = "rgba(120, 120, 120, 0.40)"
     _NONHIT_LINE = "rgba(80, 80, 80, 1.0)"
     _GAP_COLOR = "#444444"
@@ -1985,15 +1995,15 @@ def plot_predicted_distribution_animation(
             f"Mean non-hit ŷ = {mean_nonhit:.2f}", showlegend=True,
         )
 
-        # Horizontal gap bracket drawn as a lines+text scatter trace
+        # Horizontal gap bracket: text label on the LEFT side of the bar
         gap_y = y_max * 0.82
         trace_gap = go.Scatter(
             x=[mean_nonhit, mean_hit],
             y=[gap_y, gap_y],
             mode="lines+text",
             line=dict(color=_GAP_COLOR, width=2),
-            text=["", f"  gap = {gap:+.2f}"],
-            textposition="middle right",
+            text=[f"gap = {gap:+.2f}", ""],
+            textposition="middle left",
             textfont=dict(size=13, color=_GAP_COLOR),
             showlegend=False,
             name="gap",
@@ -2085,8 +2095,8 @@ def plot_predicted_distribution_animation(
                     type="buttons",
                     showactive=False,
                     y=1.15,
-                    x=0.5,
-                    xanchor="center",
+                    x=1.0,
+                    xanchor="right",
                     yanchor="top",
                     buttons=[
                         dict(
@@ -2095,9 +2105,12 @@ def plot_predicted_distribution_animation(
                             args=[
                                 None,
                                 dict(
-                                    frame=dict(duration=600, redraw=True),
+                                    frame=dict(duration=_DIST_FRAME_MS, redraw=True),
                                     fromcurrent=True,
-                                    transition=dict(duration=100, easing="linear"),
+                                    transition=dict(
+                                        duration=_DIST_TRANSITION_MS,
+                                        easing="linear",
+                                    ),
                                 ),
                             ],
                         ),
