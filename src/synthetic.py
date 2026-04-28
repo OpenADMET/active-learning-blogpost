@@ -672,7 +672,7 @@ def _upper_confidence_bound(
 
 
 def query_batch_synthetic(
-    oracle: SyntheticOracle,
+    oracle: SyntheticOracle | CachedPredOracle,
     smiles_unlabeled: list[str],
     strategy: str,
     best_y: float,
@@ -753,7 +753,7 @@ def query_batch_synthetic(
 
 
 def _evaluate_oracle_on_test(
-    oracle: SyntheticOracle,
+    oracle: SyntheticOracle | CachedPredOracle,
     smiles_test: list[str],
     y_test: np.ndarray,
     iteration: int,
@@ -766,7 +766,7 @@ def _evaluate_oracle_on_test(
 
     Parameters
     ----------
-    oracle : SyntheticOracle
+    oracle : SyntheticOracle or CachedPredOracle
         Trained (or here, parametric) oracle.
     smiles_test : list[str]
         SMILES strings for test compounds.
@@ -824,7 +824,7 @@ def _evaluate_oracle_on_test(
 def run_active_learning_synthetic(
     df_pool: pd.DataFrame,
     df_test: pd.DataFrame,
-    oracle: SyntheticOracle,
+    oracle: SyntheticOracle | CachedPredOracle,
     n_start: int = 100,
     k_iter: int = 15,
     query_size: int = 20,
@@ -847,7 +847,7 @@ def run_active_learning_synthetic(
         Candidate pool with columns ``"smiles"`` and ``"pEC50"``.
     df_test : pd.DataFrame
         Held-out test set with columns ``"smiles"`` and ``"pEC50"``.
-    oracle : SyntheticOracle
+    oracle : SyntheticOracle or CachedPredOracle
         Configured oracle; must have ``smiles_to_y`` entries for all pool,
         test, and seed compounds.
     n_start : int, optional

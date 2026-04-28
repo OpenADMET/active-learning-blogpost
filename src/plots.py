@@ -593,8 +593,8 @@ def plot_gtm_selection_animation(
 
     # Static background: all pool compounds + optional background molecules shown as
     # light gray.  These never animate; the data traces render on top when queried.
-    bg_x = list(gtm_coords[:, 0])
-    bg_y = list(gtm_coords[:, 1])
+    bg_x = np.array(gtm_coords[:, 0])
+    bg_y = np.array(gtm_coords[:, 1])
     if background_gtm_coords is not None:
         bg_x = np.concatenate([bg_x, background_gtm_coords[:, 0]])
         bg_y = np.concatenate([bg_y, background_gtm_coords[:, 1]])

@@ -18,7 +18,11 @@ This repository is a tutorial/blogpost benchmarking **active learning with query
 blogpost.md                       # Primary document (the blogpost, prose + figure links)
 run.py                            # Entry point 1: run the AL pipeline
 analysis.py                       # Entry point 2: consume results/*.pkl → all HTML/PNG figures
-makeitso.sh                       # SLURM submission script for all 8 configs
+analysis_combined.py              # Entry point 3: cross-config grid figures (ASAP 1×2, PXR 2×2)
+synthetic_run.py                  # Entry point 4: fast oracle-based AL (no GPU)
+synthetic_analysis.py             # Entry point 5: figures for synthetic oracle results
+verify_stats.py                   # Statistical verification of blogpost claims
+makeitso.sh                       # SLURM submission script for all 8 real configs
 config/
     pxr_chemeleon_chembl_config.yaml
     pxr_chemeleon_config.yaml
@@ -28,11 +32,20 @@ config/
     asap_chemeleon_config.yaml
     asap_chemprop_chembl_config.yaml
     asap_chemprop_config.yaml
+    oracle_pxr_rho00_config.yaml  # Synthetic oracle configs (ρ=0, 0.3, 0.6, 0.9 variants)
+    oracle_pxr_rho03_config.yaml
+    oracle_pxr_rho06_config.yaml
+    oracle_pxr_rho09_config.yaml
+    oracle_asap_rho00_config.yaml # ASAP synthetic oracle configs
+    oracle_asap_rho03_config.yaml
+    oracle_asap_rho06_config.yaml
+    oracle_asap_rho09_config.yaml
 src/
     __init__.py
     config.py                     # ALConfig dataclass + load_config() — all config parsing/validation
     helpers.py                    # Core AL utilities and module-level constants
     plots.py                      # All Plotly/Faerun plotting functions
+    synthetic.py                  # SyntheticOracle, CachedPredOracle, oracle AL loop
 data/
     pxr_challenge_train.csv       # PXR dataset (4140 rows; random 80/20 split → ~3312 pool)
     asap_potency.csv              # ASAP Mpro dataset (1031 Train / 297 Test; predefined split)
@@ -44,6 +57,10 @@ results/                          # Generated artifacts (one subdirectory per co
 
 - **`run.py`** — loads the dataset, applies the configured split type, fits the GTM embedding, and saves `<results_path>/setup_<split_type>.pkl`. Then runs `run_active_learning` for each requested `(strategy, seed)` pair, saving one `<results_path>/run_<split_type>_<STRATEGY>_seed<N>.pkl` per job. Skips jobs that already have output files (safe to resume). CLI flags: `--config PATH`, `--setup-only`, `--strategy S`, `--seed N`.
 - **`analysis.py`** — loads `setup_<split>.pkl` and all `run_<split>_*.pkl` files from `results_path`, performs sanity checks, unpacks results into tidy DataFrames, and writes all interactive HTML + SVG figures. CLI flags: `--config PATH`, `--hit-threshold FLOAT`.
+- **`analysis_combined.py`** — loads results from all six real configs and produces individual panel figures plus combined multi-panel grid figures (ASAP 1×2, PXR 2×2). CLI flags: `--asap-hit-threshold FLOAT`, `--pxr-hit-threshold FLOAT`, `--output-dir DIR`.
+- **`synthetic_run.py`** — mirrors `run.py` exactly but replaces committee training with a fast `SyntheticOracle` that knows all true labels and simulates predictions with configurable MAE and Spearman ρ(σ, |error|). No GPU required. CLI flags: `--config PATH`, `--setup-only`, `--split-type S`, `--strategy S`, `--seed N`, `--smoke-test`.
+- **`synthetic_analysis.py`** — mirrors `analysis.py` for synthetic oracle results; also generates oracle-tier comparison tables. CLI flags: `--config PATH`, `--hit-threshold FLOAT`.
+- **`verify_stats.py`** — one-to-one verification of all statistical claims in `blogpost.md`. Run as `python verify_stats.py` after generating results.
 
 ### Configuration
 
@@ -128,7 +145,7 @@ active_learning:
 | Function | Purpose |
 |---|---|
 | `smiles_to_gtm(smiles_list, ...)` | Fit a GTM and return `(gtm, crds_2d, resps, llhs)` |
-| `smiles_to_tmap(smiles_list, ...)` | Compute TMAP layout; return `(x, y, s, t)` |
+| `smiles_to_tmap(smiles_list, ...)` | Compute TMAP layout; return `(x, y, s, t, edge_sims)` |
 | `split_data(X, y, ...)` | Scaffold/random/cluster split into pool / test |
 | `featurize(smiles_list, y_list, shuffle)` | Return `(loader, scaler)` for ChemProp |
 | `build_committee_member(seed, max_epochs, log_dir)` | Return `(model, trainer)` |
@@ -139,15 +156,32 @@ active_learning:
 
 Constants exported: `STRATEGIES`, `STRATEGY_COLORS`, `STRATEGY_QUERY_KEYS`.
 
+## Synthetic oracle (`src/synthetic.py`)
+
+| Class / Function | Purpose |
+|---|---|
+| `SyntheticOracle` | Parametric oracle: simulates predictions with configurable MAE and Spearman ρ(σ, \|error\|), both ramping linearly over iterations |
+| `CachedPredOracle` | Loads pre-computed prediction trajectories from a cache file; identical interface to `SyntheticOracle` |
+| `load_synthetic_config(path)` | Parse the `oracle:` section of a synthetic YAML config |
+| `generate_prediction_cache(oracle_cfg, smiles_to_y, k_iter, path)` | Pre-compute and persist oracle predictions |
+| `query_batch_synthetic(oracle, smiles_unlabeled, ...)` | Select next batch using the oracle; same interface as `query_batch` |
+| `run_active_learning_synthetic(df_pool, df_test, oracle, ...)` | Full synthetic oracle AL loop; identical output format to `run_active_learning` |
+
 ## Plotting functions (`src/plots.py`)
 
 | Function | Output |
 |---|---|
 | `plot_learning_curve_with_bands(...)` | Plotly line plot with ±1σ shading per strategy |
+| `plot_learning_curve_grid(...)` | Multi-panel grid of learning curves (M rows × N cols) |
 | `plot_hit_discovery_curve(...)` | Cumulative hits found vs. labeled pool size |
+| `plot_hit_discovery_curve_grid(...)` | Multi-panel grid of hit discovery curves |
 | `plot_calibration_curve_before_after(...)` | Before/after calibration curves |
+| `plot_calibration_area_per_iteration(...)` | Miscalibration area (pre- and post-calibration) vs. iteration |
+| `plot_sigma_error_correlation(...)` | Spearman ρ(σ, \|error\|) vs. labeled pool size |
 | `plot_gtm_selection_animation(...)` | Animated Plotly scatter on GTM embedding |
-| `plot_tmap_faerun(...)` | Interactive Faerun/TMAP HTML scatter |
+| `plot_tmap_faerun(...)` | Interactive Faerun/TMAP HTML scatter colored by AL iteration |
+| `plot_tmap_faerun_strategies(...)` | Interactive Faerun/TMAP HTML with per-strategy selection overlays |
+| `plot_tmap_faerun_partition(...)` | Interactive Faerun/TMAP HTML colored by train/test partition |
 
 ## Coding conventions
 

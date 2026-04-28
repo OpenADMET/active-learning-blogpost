@@ -159,7 +159,7 @@ def smiles_to_tmap(
     sl_repeats: int = 2,
     mmm_repeats: int = 2,
     node_size: int = 1,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute a TMAP layout for a list of SMILES strings.
 
     Encodes each molecule as a fingerprint, hashes all fingerprints into an

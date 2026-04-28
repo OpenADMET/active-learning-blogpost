@@ -59,9 +59,6 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import plotly.graph_objects as go  # noqa: E402
 from kaleido import Kaleido  # noqa: E402
-from scipy.stats import spearmanr  # noqa: E402
-
-import src.plots as alp  # noqa: E402
 from analysis import (  # noqa: E402
     build_split_data,
     generate_hit_discovery_curve,

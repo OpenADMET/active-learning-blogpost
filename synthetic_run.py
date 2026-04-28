@@ -135,7 +135,7 @@ def run_job(
     seed: int,
     split_type: str,
     setup: dict,
-    oracle: SyntheticOracle,
+    oracle: SyntheticOracle | CachedPredOracle,
     cfg: ALConfig,
     results_dir: Path,
 ) -> None:
@@ -363,6 +363,7 @@ def main() -> None:
             df_s: pd.DataFrame = setup["df_seed"]
             smiles_to_y.update(zip(df_s["smiles"].tolist(), df_s["pEC50"].tolist()))
 
+        oracle: SyntheticOracle | CachedPredOracle
         if oracle_cfg.cache_path is not None:
             oracle = _load_or_build_cached_oracle(
                 oracle_cfg, smiles_to_y, cfg.k_iter
