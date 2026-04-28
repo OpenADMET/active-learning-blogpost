@@ -28,6 +28,8 @@ Generated outputs (written to ``<results_path>/``)::
     tmap_selection.html / .svg                — interactive TMAP (Exploitation, via Faerun)
     tmap_partition.html / .svg                — TMAP colored by train / test partition
     calibration_curve.html / .svg             — before/after scaling factor calibration
+    predicted_distribution_{strategy}_seed{seed}.html — animated hit/non-hit KDE (test set)
+                                              per AL iteration; HTML-only
 
 Requires ``kaleido`` for SVG export (``pip install kaleido``).
 """
@@ -663,6 +665,9 @@ def generate_calibration_curve(
         Y-axis range override for the output figure.
     """
     print("Generating calibration curve...")
+    if strategy not in all_runs or not all_runs[strategy]:
+        strategy = next(iter(all_runs))
+        print(f"  Requested strategy missing; falling back to '{strategy}'")
     final_state = all_runs[strategy][0]["history"][-1]
 
     exp_pre, obs_pre = uct.metrics_calibration.get_proportion_lists_vectorized(
@@ -739,6 +744,9 @@ def generate_gtm_figures(
         Y-axis range override. Applied to both the Plotly figure and the
         matplotlib axes.
     """
+    if method not in all_runs or not all_runs[method]:
+        method = next(iter(all_runs))
+        print(f"  Requested strategy missing for GTM; falling back to '{method}'")
     print(f"Generating GTM animation ({method})...")
     fig = alp.plot_gtm_selection_animation(
         gtm_coords=gtm_coords_pool,
@@ -917,6 +925,9 @@ def generate_tmap_figures(
     if edge_similarity_threshold > 0.0:
         emask = t_edge_sims >= edge_similarity_threshold
         ts, tt = ts[emask], tt[emask]
+    if strategy not in all_runs or not all_runs[strategy]:
+        strategy = next(iter(all_runs))
+        print(f"  Requested strategy missing for TMAP snapshot; falling back to '{strategy}'")
     exploitation_history = all_runs[strategy][0]["history"]
     exploitation_iters = sorted({s["iteration"] for s in exploitation_history})
     exploitation_iter_to_cat = {
@@ -1140,6 +1151,65 @@ def export_plotly_svgs(svg_tasks: list[tuple]) -> None:
     asyncio.run(_export())
 
 
+def generate_predicted_distribution_animation(
+    all_runs: dict[str, list],
+    df_test: pd.DataFrame,
+    results_dir: str | Path,
+    *,
+    hit_threshold: float = 6.0,
+    activity_col: str = "pEC50",
+) -> None:
+    """Generate and save animated hit/non-hit predicted-distribution figures.
+
+    For every (strategy, seed) run, generates an animated Plotly figure showing
+    the committee's predicted-activity KDE curves for hits and non-hits on the
+    **held-out test set** over the course of the AL simulation.  The test-set
+    predictions (``"y_test_pred"``) are stored in every run without any special
+    flags, so this figure is always available.
+
+    Saves one HTML file per (strategy, seed):
+    ``predicted_distribution_{strategy}_seed{seed}.html``.
+
+    Figures are HTML-only; Plotly animations cannot be exported to static SVG.
+
+    Parameters
+    ----------
+    all_runs : dict[str, list]
+        Per-strategy run histories as returned by ``build_split_data``.
+        Each value is a list of ``{"seed": int, "history": list[dict]}`` dicts.
+    df_test : pd.DataFrame
+        Held-out test DataFrame with an ``activity_col`` column for ground-truth
+        activity values.  Row order must match ``y_test_pred`` in history states.
+    results_dir : str or Path
+        Directory to write output files.
+    hit_threshold : float, optional
+        Activity value at or above which a compound is counted as a hit.
+        Default is 6.0.
+    activity_col : str, optional
+        Column in ``df_test`` with ground-truth activity values.
+        Default is ``"pEC50"``.
+    """
+    results_dir = Path(results_dir)
+    for strategy, runs in all_runs.items():
+        for run in runs:
+            history = run["history"]
+            seed = run["seed"]
+            if not history:
+                continue
+            print(f"Generating predicted distribution animation: {strategy} seed={seed} ...")
+            fig = alp.plot_predicted_distribution_animation(
+                history=history,
+                df_test=df_test,
+                hit_threshold=hit_threshold,
+                activity_col=activity_col,
+                strategy=strategy,
+                seed=seed,
+            )
+            out_path = results_dir / f"predicted_distribution_{strategy}_seed{seed}.html"
+            fig.write_html(str(out_path))
+            print(f"  saved {out_path}")
+
+
 def main() -> None:
     """Load AL results, run sanity checks, assemble DataFrames, and write all figures.
 
@@ -1216,6 +1286,15 @@ def main() -> None:
     )
     generate_calibration_curve(
         all_runs_primary, df_test_primary, results_dir, svg_queue
+    )
+
+    # Distribution animation: uses y_test_pred already stored in every run pickle.
+    generate_predicted_distribution_animation(
+        all_runs_primary,
+        df_test_primary,
+        results_dir,
+        hit_threshold=args.hit_threshold,
+        activity_col="pEC50",
     )
 
     for split_type, split_data in per_split_data.items():

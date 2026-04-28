@@ -1816,3 +1816,307 @@ def plot_hit_discovery_curve_grid(
         margin=dict(t=60, b=60),
     )
     return fig
+
+
+def plot_predicted_distribution_animation(
+    history: list[dict],
+    df_test: pd.DataFrame,
+    hit_threshold: float = 6.0,
+    activity_col: str = "pEC50",
+    strategy: str = "Exploitation",
+    seed: int = 42,
+    n_kde_points: int = 400,
+    width: int = 800,
+    height: int = 500,
+) -> go.Figure:
+    """Animated figure showing committee predicted-activity distributions for hits vs non-hits.
+
+    At each AL iteration two overlapping, semi-transparent KDE curves are drawn
+    using the committee's predictions on the **held-out test set** — one for
+    compounds that are ground-truth hits (activity ≥ threshold) and one for
+    non-hits.  Vertical lines mark each group's mean prediction and a horizontal
+    annotation shows the gap value.  A Plotly slider lets viewers scrub through
+    iterations; Play/Pause buttons run the animation.
+
+    Uses ``"y_test_pred"`` from each history state, which is stored for every
+    run without any special flags.
+
+    Parameters
+    ----------
+    history : list[dict]
+        Per-iteration state records from ``run_active_learning``, each
+        containing at minimum ``"iteration"``, ``"n_labeled"``, and
+        ``"y_test_pred"`` (``np.ndarray`` of shape ``(n_test,)``).
+    df_test : pd.DataFrame
+        Held-out test DataFrame with an ``activity_col`` column giving
+        ground-truth activity values.  Row order must match ``y_test_pred``
+        in each history state.
+    hit_threshold : float, optional
+        Activity value at or above which a compound is counted as a hit.
+        Default is 6.0.
+    activity_col : str, optional
+        Column in ``df_test`` containing the ground-truth activity values.
+        Default is ``"pEC50"``.
+    strategy : str, optional
+        Strategy name shown in figure titles and axis labels.
+        Default is ``"Exploitation"``.
+    seed : int, optional
+        Seed used for this run; shown in the figure title.
+        Default is 42.
+    n_kde_points : int, optional
+        Number of evenly spaced points used to evaluate each KDE curve.
+        Default is 400.
+    width : int, optional
+        Figure width in pixels.  Default is 800.
+    height : int, optional
+        Figure height in pixels.  Default is 500.
+
+    Returns
+    -------
+    go.Figure
+        Animated Plotly figure.  The figure is intended for HTML export only
+        (Plotly animations are not supported in static SVG/PNG output).
+
+    Raises
+    ------
+    ValueError
+        If ``history`` is empty.
+    """
+    from scipy.stats import gaussian_kde  # local import — not needed elsewhere
+
+    if not history:
+        raise ValueError("history is empty; nothing to animate.")
+
+    y_true = df_test[activity_col].to_numpy()
+    hit_mask = y_true >= hit_threshold
+    nonhit_mask = ~hit_mask
+    n_hits = int(hit_mask.sum())
+    n_nonhits = int(nonhit_mask.sum())
+
+    # Colour palette: green for hits, gray for non-hits
+    _HIT_COLOR = "rgba(33, 150, 83, 0.55)"
+    _HIT_LINE = "rgba(33, 150, 83, 1.0)"
+    _NONHIT_COLOR = "rgba(120, 120, 120, 0.40)"
+    _NONHIT_LINE = "rgba(80, 80, 80, 1.0)"
+    _GAP_COLOR = "#444444"
+
+    # Stable x range across all frames
+    all_preds = np.concatenate([np.asarray(s["y_test_pred"]) for s in history])
+    x_min = float(np.nanpercentile(all_preds, 0.5))
+    x_max = float(np.nanpercentile(all_preds, 99.5))
+    x_grid = np.linspace(x_min, x_max, n_kde_points)
+
+    def _kde_trace(
+        y_pred_subset: np.ndarray,
+        x_grid: np.ndarray,
+        fill_color: str,
+        line_color: str,
+        name: str,
+        showlegend: bool,
+    ) -> go.Scatter:
+        """Return a filled KDE scatter trace for one activity class."""
+        if len(y_pred_subset) < 2:
+            density = np.zeros_like(x_grid)
+        else:
+            kde = gaussian_kde(y_pred_subset)
+            density = kde(x_grid)
+        return go.Scatter(
+            x=x_grid.tolist(),
+            y=density.tolist(),
+            mode="lines",
+            fill="tozeroy",
+            fillcolor=fill_color,
+            line=dict(color=line_color, width=1.5),
+            name=name,
+            showlegend=showlegend,
+        )
+
+    def _vline_trace(
+        x_val: float,
+        y_max: float,
+        color: str,
+        name: str,
+        showlegend: bool,
+    ) -> go.Scatter:
+        """Return a vertical dashed line trace at x_val."""
+        return go.Scatter(
+            x=[x_val, x_val],
+            y=[0, y_max * 1.05],
+            mode="lines",
+            line=dict(color=color, dash="dash", width=1.5),
+            name=name,
+            showlegend=showlegend,
+        )
+
+    frames: list[go.Frame] = []
+    frame_ymaxes: list[float] = []
+
+    for state in history:
+        y_pred = np.asarray(state["y_test_pred"])
+        n_labeled = state["n_labeled"]
+        k = state["iteration"]
+
+        y_hits = y_pred[hit_mask]
+        y_nonhits = y_pred[nonhit_mask]
+
+        mean_hit = float(np.mean(y_hits))
+        mean_nonhit = float(np.mean(y_nonhits))
+        gap = mean_hit - mean_nonhit
+
+        trace_hits = _kde_trace(
+            y_hits, x_grid, _HIT_COLOR, _HIT_LINE,
+            f"Hits (≥{hit_threshold:.1f}, n={n_hits})", showlegend=True,
+        )
+        trace_nonhits = _kde_trace(
+            y_nonhits, x_grid, _NONHIT_COLOR, _NONHIT_LINE,
+            f"Non-hits (n={n_nonhits})", showlegend=True,
+        )
+
+        all_density = list(np.array(trace_hits.y)) + list(np.array(trace_nonhits.y))
+        y_max = max(float(np.max(all_density)), 1e-6)
+        frame_ymaxes.append(y_max)
+
+        trace_vhit = _vline_trace(
+            mean_hit, y_max, _HIT_LINE,
+            f"Mean hit ŷ = {mean_hit:.2f}", showlegend=True,
+        )
+        trace_vnonhit = _vline_trace(
+            mean_nonhit, y_max, _NONHIT_LINE,
+            f"Mean non-hit ŷ = {mean_nonhit:.2f}", showlegend=True,
+        )
+
+        # Horizontal gap bracket drawn as a lines+text scatter trace
+        gap_y = y_max * 0.82
+        trace_gap = go.Scatter(
+            x=[mean_nonhit, mean_hit],
+            y=[gap_y, gap_y],
+            mode="lines+text",
+            line=dict(color=_GAP_COLOR, width=2),
+            text=["", f"  gap = {gap:+.2f}"],
+            textposition="middle right",
+            textfont=dict(size=13, color=_GAP_COLOR),
+            showlegend=False,
+            name="gap",
+        )
+
+        frame_title = (
+            f"Strategy: {strategy} | Seed: {seed} | "
+            f"Iteration {k} | {n_labeled} labeled"
+        )
+        frames.append(
+            go.Frame(
+                data=[trace_hits, trace_nonhits, trace_vhit, trace_vnonhit, trace_gap],
+                name=str(k),
+                layout=go.Layout(title_text=frame_title),
+            )
+        )
+
+    global_y_max = max(frame_ymaxes) * 1.15
+    initial_frame = frames[0]
+    fig = go.Figure(
+        data=initial_frame.data,
+        frames=frames,
+        layout=go.Layout(
+            title=dict(
+                text=initial_frame.layout.title.text,
+                font=dict(size=14),
+                x=0.5,
+                xanchor="center",
+            ),
+            xaxis=dict(
+                title=f"Committee mean predicted {activity_col} (test set)",
+                range=[x_min - 0.1, x_max + 0.1],
+                showgrid=True,
+                gridcolor="#eeeeee",
+                zeroline=False,
+                linecolor="black",
+                linewidth=1,
+                mirror=True,
+            ),
+            yaxis=dict(
+                title="Density",
+                range=[0, global_y_max],
+                showgrid=True,
+                gridcolor="#eeeeee",
+                zeroline=False,
+                linecolor="black",
+                linewidth=1,
+                mirror=True,
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            legend=dict(
+                x=0.02,
+                y=0.98,
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="#cccccc",
+                borderwidth=1,
+            ),
+            width=width,
+            height=height,
+            sliders=[
+                dict(
+                    active=0,
+                    currentvalue=dict(
+                        prefix="Iteration: ",
+                        visible=True,
+                        xanchor="center",
+                    ),
+                    pad=dict(b=10, t=50),
+                    steps=[
+                        dict(
+                            method="animate",
+                            args=[
+                                [str(s["iteration"])],
+                                dict(
+                                    mode="immediate",
+                                    frame=dict(duration=0, redraw=True),
+                                    transition=dict(duration=0),
+                                ),
+                            ],
+                            label=str(s["iteration"]),
+                        )
+                        for s in history
+                    ],
+                )
+            ],
+            updatemenus=[
+                dict(
+                    type="buttons",
+                    showactive=False,
+                    y=1.15,
+                    x=0.5,
+                    xanchor="center",
+                    yanchor="top",
+                    buttons=[
+                        dict(
+                            label="▶ Play",
+                            method="animate",
+                            args=[
+                                None,
+                                dict(
+                                    frame=dict(duration=600, redraw=True),
+                                    fromcurrent=True,
+                                    transition=dict(duration=100, easing="linear"),
+                                ),
+                            ],
+                        ),
+                        dict(
+                            label="⏸ Pause",
+                            method="animate",
+                            args=[
+                                [None],
+                                dict(
+                                    frame=dict(duration=0, redraw=False),
+                                    mode="immediate",
+                                    transition=dict(duration=0),
+                                ),
+                            ],
+                        ),
+                    ],
+                )
+            ],
+        ),
+    )
+    return fig
+

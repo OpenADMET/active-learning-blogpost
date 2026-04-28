@@ -299,6 +299,7 @@ def run_job(
     split_type: str,
     setup: dict,
     results_dir: Path = Path("results"),
+    store_pool_preds: bool = False,
 ) -> None:
     """Run one (split_type, strategy, seed) triple and write its result to disk.
 
@@ -319,6 +320,12 @@ def run_job(
     results_dir : Path, optional
         Directory where result pickles are written.
         Default is ``Path("results")``.
+    store_pool_preds : bool, optional
+        When ``True``, pass ``store_pool_preds=True`` to ``run_active_learning``
+        so that committee mean predictions on the full pool are stored in each
+        history state dict under the key ``"y_pool_pred"``.  Enables the
+        animated hit/non-hit distribution figure in ``analysis.py``.
+        Default is False.
 
     """
     cfg: ALConfig = setup["config"]
@@ -347,6 +354,7 @@ def run_job(
         df_seed=setup.get("df_seed"),
         gtm_coords=setup["gtm_coords_pool"],
         use_chemeleon=cfg.use_chemeleon,
+        store_pool_preds=store_pool_preds,
     )
 
     with open(out_path, "wb") as fh:
@@ -418,6 +426,14 @@ def main() -> None:
         default=None,
         help="Random seed to use. Omit to run all seeds defined in config.",
     )
+    parser.add_argument(
+        "--store-pool-preds",
+        action="store_true",
+        help="Store committee mean predictions on the full pool at every "
+        "iteration (key 'y_pool_pred' in each history state dict). "
+        "Required for the animated hit/non-hit distribution figure in "
+        "analysis.py. Adds one committee forward pass per iteration.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -461,7 +477,14 @@ def main() -> None:
         setup = load_or_run_setup(split_type, args.config, results_dir=results_dir)
         for strategy in strategies_to_run:
             for seed in seeds_to_run:
-                run_job(strategy, seed, split_type, setup, results_dir=results_dir)
+                run_job(
+                    strategy,
+                    seed,
+                    split_type,
+                    setup,
+                    results_dir=results_dir,
+                    store_pool_preds=args.store_pool_preds,
+                )
 
     print("\nAll jobs complete.")
 

@@ -649,6 +649,7 @@ def run_active_learning(
     df_seed: pd.DataFrame | None = None,
     gtm_coords: np.ndarray | None = None,
     use_chemeleon: bool = True,
+    store_pool_preds: bool = False,
 ) -> dict:
     """Execute a full active learning loop for one strategy and seed.
 
@@ -709,6 +710,12 @@ def run_active_learning(
         Whether to initialise each committee member from CheMeleon pretrained
         weights. Set to ``False`` for random-initialisation ablations.
         Default is True.
+    store_pool_preds : bool, optional
+        When ``True``, predict on the entire ``df_pool`` after each iteration
+        and store the committee's mean predictions as ``state["y_pool_pred"]``
+        (``np.ndarray``, shape ``(n_pool,)``) in the history record.  This
+        enables the animated hit/non-hit distribution figure but adds one
+        committee forward pass per iteration.  Default is False.
 
     Returns
     -------
@@ -717,7 +724,9 @@ def run_active_learning(
 
         - ``"history"`` : list[dict] — per-iteration state records, each
           containing iteration index, labeled count, best observed value,
-          pool activity values, selected indices, and test metrics.
+          pool activity values, selected indices, test metrics, and optionally
+          ``"y_pool_pred"`` (committee mean predictions on all pool compounds)
+          when ``store_pool_preds=True``.
         - ``"committee"`` : CommitteeRegressor — committee trained on the
           final labeled set.
 
@@ -853,6 +862,14 @@ def run_active_learning(
             "miscal_area_pre_cal": res_pre["miscal_area"],
             **res,
         }
+
+        if store_pool_preds:
+            # Predict on full pool (labeled + unlabeled) so downstream code can
+            # compute the hit/non-hit predicted-activity gap at each iteration.
+            X_pool_loader, _ = featurize(df_pool["smiles"].tolist())
+            pool_mean, _ = committee.predict(X_pool_loader, return_std=True)
+            state["y_pool_pred"] = pool_mean.flatten()
+
         history.append(state)
 
         # Query step (if not last iteration)
