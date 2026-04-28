@@ -62,7 +62,13 @@ import pandas as pd
 import yaml
 
 from src.config import ALConfig, _VALID_SPLIT_TYPES, load_config
-from src.synthetic import SyntheticOracle, load_synthetic_config, run_active_learning_synthetic
+from src.synthetic import (
+    CachedPredOracle,
+    SyntheticOracle,
+    generate_prediction_cache,
+    load_synthetic_config,
+    run_active_learning_synthetic,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -193,6 +199,70 @@ def run_job(
 
 
 # ---------------------------------------------------------------------------
+# Cached oracle helper
+# ---------------------------------------------------------------------------
+
+
+def _load_or_build_cached_oracle(
+    oracle_cfg,
+    smiles_to_y: dict,
+    k_iter: int,
+) -> "CachedPredOracle":
+    """Load or lazily generate the prediction cache, then return a CachedPredOracle.
+
+    If the cache file already exists it is loaded directly.  Otherwise the
+    cache is generated from the configured source run directory and saved
+    atomically (so parallel jobs are safe — the second writer is a no-op
+    because :func:`generate_prediction_cache` uses an atomic rename).
+
+    Parameters
+    ----------
+    oracle_cfg : SyntheticConfig
+        Must have ``cache_path`` set.
+    smiles_to_y : dict
+        Ground-truth lookup for all compounds.
+    k_iter : int
+        Total AL iterations (for rho ramping).
+
+    Returns
+    -------
+    CachedPredOracle
+    """
+    cache_path = Path(oracle_cfg.cache_path).expanduser()
+
+    if not cache_path.exists():
+        if oracle_cfg.cache_source_results_dir is None:
+            raise ValueError(
+                f"Cache file {cache_path} does not exist and "
+                "'cache_source_results_dir' is not set in the oracle config.  "
+                "Either pre-generate the cache or set cache_source_results_dir."
+            )
+        if oracle_cfg.cache_source_split_type is None:
+            raise ValueError(
+                "'cache_source_split_type' must be set when generating a cache."
+            )
+        print(f"Cache not found — generating from {oracle_cfg.cache_source_results_dir} ...")
+        generate_prediction_cache(
+            results_dir=oracle_cfg.cache_source_results_dir,
+            split_type=oracle_cfg.cache_source_split_type,
+            strategy=oracle_cfg.cache_source_strategy,
+            seeds=oracle_cfg.cache_source_seeds,
+            output_path=cache_path,
+        )
+
+    with open(cache_path, "rb") as fh:
+        pred_cache = pickle.load(fh)
+
+    return CachedPredOracle(
+        pred_cache=pred_cache,
+        smiles_to_y=smiles_to_y,
+        oracle_cfg=oracle_cfg,
+        k_iter=k_iter,
+        seed=42,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -293,12 +363,17 @@ def main() -> None:
             df_s: pd.DataFrame = setup["df_seed"]
             smiles_to_y.update(zip(df_s["smiles"].tolist(), df_s["pEC50"].tolist()))
 
-        oracle = SyntheticOracle(
-            smiles_to_y=smiles_to_y,
-            oracle_cfg=oracle_cfg,
-            k_iter=cfg.k_iter,
-            seed=42,  # Oracle noise seed — independent of per-run seed
-        )
+        if oracle_cfg.cache_path is not None:
+            oracle = _load_or_build_cached_oracle(
+                oracle_cfg, smiles_to_y, cfg.k_iter
+            )
+        else:
+            oracle = SyntheticOracle(
+                smiles_to_y=smiles_to_y,
+                oracle_cfg=oracle_cfg,
+                k_iter=cfg.k_iter,
+                seed=42,
+            )
 
         for strategy in strategies_to_run:
             for seed in seeds_to_run:

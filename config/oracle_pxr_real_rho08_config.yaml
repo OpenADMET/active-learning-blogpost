@@ -1,12 +1,10 @@
-# Oracle config for PXR — rho=0.3 (modest correlation between uncertainty and residuals)
-# Strategies: EI, UCB, Random, Exploitation, Exploration (no Diversity)
-# MAE fixed at 0.6 across all constant-rho tiers.
+# Oracle config for PXR — real CheMeleon predictions, rho=0.8
 
 data:
   dataset_path: data/pxr_challenge_train.csv
   dataset_smiles_col: SMILES
   dataset_activity_col: pEC50
-  results_path: results/oracle_pxr_rho03
+  results_path: results/oracle_pxr_real_rho08
   dataset_split_seed: 43
   gtm_seed: 1234
   setup_results_path: results/pxr_chemprop
@@ -41,10 +39,17 @@ clustering:
   butina_cutoff: 0.65
 
 oracle:
-  initial_mae: 0.6
-  final_mae: 0.6
-  initial_uncertainty_rho: 0.3
-  final_uncertainty_rho: 0.3
-  initial_shrinkage: 0.45
-  final_shrinkage: 0.45
+  cache_path: results/pxr_chemeleon_exploitation_cache.pkl
+  cache_source_results_dir: results/pxr_chemeleon
+  cache_source_split_type: random
+  cache_source_strategy: Exploitation
+  cache_source_seeds: [42, 43, 44, 45, 46]
+
+  initial_uncertainty_rho: 0.8
+  final_uncertainty_rho: 0.8
+
+  initial_mae: 0.0
+  final_mae: 0.0
+  initial_shrinkage: 1.0
+  final_shrinkage: 1.0
   noise_heteroscedasticity: 0.0

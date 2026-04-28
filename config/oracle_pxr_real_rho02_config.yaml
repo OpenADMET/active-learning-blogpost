@@ -1,0 +1,55 @@
+# Oracle config for PXR — real CheMeleon predictions, rho=0.2
+
+data:
+  dataset_path: data/pxr_challenge_train.csv
+  dataset_smiles_col: SMILES
+  dataset_activity_col: pEC50
+  results_path: results/oracle_pxr_real_rho02
+  dataset_split_seed: 43
+  gtm_seed: 1234
+  setup_results_path: results/pxr_chemprop
+  seed_data_path: null
+  seed_smiles_col: SMILES
+  seed_activity_col: pEC50
+
+active_learning:
+  strategies:
+    - EI
+    - UCB
+    - Random
+    - Exploitation
+    - Exploration
+  split_types:
+    - random
+  seeds: [42, 43, 44, 45, 46]
+  k_iter: 32
+  query_size: 100
+  n_start: 100
+
+training:
+  n_models: 5
+  max_epochs: 200
+  es_min_delta: 0.001
+  es_patience: 15
+  use_chemeleon: false
+
+clustering:
+  method: butina
+  k_clusters: 10
+  butina_cutoff: 0.65
+
+oracle:
+  cache_path: results/pxr_chemeleon_exploitation_cache.pkl
+  cache_source_results_dir: results/pxr_chemeleon
+  cache_source_split_type: random
+  cache_source_strategy: Exploitation
+  cache_source_seeds: [42, 43, 44, 45, 46]
+
+  initial_uncertainty_rho: 0.2
+  final_uncertainty_rho: 0.2
+
+  initial_mae: 0.0
+  final_mae: 0.0
+  initial_shrinkage: 1.0
+  final_shrinkage: 1.0
+  noise_heteroscedasticity: 0.0

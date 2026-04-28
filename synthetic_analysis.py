@@ -322,7 +322,7 @@ def _build_tier_comparison_figure(
 
     fig.update_layout(
         height=340 * n_rows + 80,
-        width=600,
+        width=420 * n_cols,
         template="plotly_white",
         legend=dict(
             orientation="h",
@@ -457,7 +457,7 @@ def _build_hit_comparison_figure(
 
     fig.update_layout(
         height=340 * n_rows + 80,
-        width=600,
+        width=420 * n_cols,
         template="plotly_white",
         legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.12),
         margin=dict(t=50, b=100, l=60, r=20),

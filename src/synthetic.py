@@ -39,8 +39,10 @@ class SyntheticConfig:
     ----------
     initial_mae : float
         Target mean absolute error (noise only) at iteration 0.
+        Ignored when ``cache_path`` is set.
     final_mae : float
         Target mean absolute error (noise only) at the last iteration.
+        Ignored when ``cache_path`` is set.
     initial_uncertainty_rho : float
         Target Spearman rank correlation between predicted sigma and
         |residuals| at iteration 0. Range [-1, 1]; typically in [0, 1].
@@ -51,9 +53,11 @@ class SyntheticConfig:
         1.0 = unbiased (current behavior); values below 1 compress predictions
         toward the global dataset mean, systematically underpredicting high
         actives as real ML models do when trained on limited data.
+        Ignored when ``cache_path`` is set.
     final_shrinkage : float
         Shrinkage factor at the final iteration (typically higher than
         initial_shrinkage, mirroring improved extrapolation with more data).
+        Ignored when ``cache_path`` is set.
     noise_heteroscedasticity : float
         Scales noise amplitude by distance above the global mean.  Empirically
         calibrated from real ChemProp/CheMeleon run residuals: ASAP Mpro shows
@@ -61,15 +65,42 @@ class SyntheticConfig:
         PXR shows no significant positive heteroscedasticity (ρ≈−0.09).
         Set to 0.0 for PXR configs; ~0.6 for ASAP configs.
         Formula: ``noise_scale = 1 + het * max(y_true − μ, 0) / σ_y``.
+        Ignored when ``cache_path`` is set.
+    cache_path : str or None
+        Path to a pre-generated prediction cache pickle.  When set, a
+        :class:`CachedPredOracle` is used instead of :class:`SyntheticOracle`;
+        predictions come from a real CheMeleon/ChemProp end-state committee
+        rather than from ground-truth + noise.  The cache is auto-generated
+        on first use if it does not exist and ``cache_source_results_dir`` is
+        provided.
+    cache_source_results_dir : str or None
+        Path to the real run results directory whose end-state committees are
+        used to build the prediction cache (e.g. ``results/pxr_chemeleon``).
+        Required when ``cache_path`` is set but the file does not yet exist.
+    cache_source_split_type : str or None
+        Split type used in the source run (e.g. ``"random"``).
+        Required for cache generation.
+    cache_source_strategy : str
+        Acquisition strategy whose end-state committees are averaged for pool
+        prediction.  Default ``"Exploitation"`` (end-state performance is
+        similar across strategies; Exploitation is most stable).
+    cache_source_seeds : list[int] or None
+        Seeds to average over for cache generation.
+        Default ``[42, 43, 44, 45, 46]`` when None.
     """
 
-    initial_mae: float
-    final_mae: float
-    initial_uncertainty_rho: float
-    final_uncertainty_rho: float
+    initial_mae: float = 0.0
+    final_mae: float = 0.0
+    initial_uncertainty_rho: float = 0.0
+    final_uncertainty_rho: float = 0.0
     initial_shrinkage: float = 1.0
     final_shrinkage: float = 1.0
     noise_heteroscedasticity: float = 0.0
+    cache_path: str | None = None
+    cache_source_results_dir: str | None = None
+    cache_source_split_type: str | None = None
+    cache_source_strategy: str = "Exploitation"
+    cache_source_seeds: list | None = None  # defaults to [42,43,44,45,46] at runtime
 
 
 def load_synthetic_config(path: str | Path) -> SyntheticConfig:
@@ -107,20 +138,37 @@ def load_synthetic_config(path: str | Path) -> SyntheticConfig:
 
     errors: list[str] = []
 
-    def _get_float(key: str) -> float | None:
+    # ── Cache-source fields (optional; only used by CachedPredOracle) ──────
+    cache_path = oracle.get("cache_path")
+    cache_source_results_dir = oracle.get("cache_source_results_dir")
+    cache_source_split_type = oracle.get("cache_source_split_type")
+    cache_source_strategy = oracle.get("cache_source_strategy", "Exploitation")
+    cache_source_seeds_raw = oracle.get("cache_source_seeds")
+    cache_source_seeds: list[int] | None = None
+    if cache_source_seeds_raw is not None:
+        if not isinstance(cache_source_seeds_raw, list):
+            errors.append("[oracle] 'cache_source_seeds' must be a list of ints")
+        else:
+            cache_source_seeds = [int(s) for s in cache_source_seeds_raw]
+
+    using_cache = cache_path is not None
+
+    def _get_float(key: str, required: bool = True) -> float | None:
         val = oracle.get(key)
         if val is None:
-            errors.append(f"[oracle] '{key}' is required")
+            if required:
+                errors.append(f"[oracle] '{key}' is required")
             return None
         if not isinstance(val, (int, float)):
             errors.append(f"[oracle] '{key}' must be a number, got {val!r}")
             return None
         return float(val)
 
-    initial_mae = _get_float("initial_mae")
-    final_mae = _get_float("final_mae")
-    initial_rho = _get_float("initial_uncertainty_rho")
-    final_rho = _get_float("final_uncertainty_rho")
+    # MAE/shrinkage/het are required for SyntheticOracle, optional for CachedPredOracle
+    initial_mae = _get_float("initial_mae", required=not using_cache)
+    final_mae = _get_float("final_mae", required=not using_cache)
+    initial_rho = _get_float("initial_uncertainty_rho", required=True)
+    final_rho = _get_float("final_uncertainty_rho", required=True)
 
     # Shrinkage is optional; defaults to 1.0 (unbiased) for backward compatibility.
     def _get_float_optional(key: str, default: float) -> float:
@@ -156,17 +204,21 @@ def load_synthetic_config(path: str | Path) -> SyntheticConfig:
             "Oracle config validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    assert initial_mae is not None and final_mae is not None
     assert initial_rho is not None and final_rho is not None
 
     return SyntheticConfig(
-        initial_mae=initial_mae,
-        final_mae=final_mae,
+        initial_mae=initial_mae if initial_mae is not None else 0.0,
+        final_mae=final_mae if final_mae is not None else 0.0,
         initial_uncertainty_rho=initial_rho,
         final_uncertainty_rho=final_rho,
         initial_shrinkage=initial_shrinkage,
         final_shrinkage=final_shrinkage,
         noise_heteroscedasticity=noise_heteroscedasticity,
+        cache_path=cache_path,
+        cache_source_results_dir=cache_source_results_dir,
+        cache_source_split_type=cache_source_split_type,
+        cache_source_strategy=cache_source_strategy,
+        cache_source_seeds=cache_source_seeds,
     )
 
 
@@ -303,59 +355,9 @@ class SyntheticOracle:
 
         # Sigma with target Spearman rho vs |residuals| (includes bias + noise)
         residuals = np.abs(y_pred - y_true)
-        sigma = self._make_sigma(residuals, rho, rng)
+        sigma = _make_sigma(residuals, rho, rng)
 
         return y_pred.reshape(-1, 1), sigma.reshape(-1, 1)
-
-    def _make_sigma(
-        self,
-        residuals: np.ndarray,
-        rho: float,
-        rng: np.random.RandomState,
-    ) -> np.ndarray:
-        """Generate sigma values with a target Spearman rho vs residuals.
-
-        Uses a Gaussian copula: the mixed latent variable is
-        ``z_mix = rho * z_r + sqrt(1 - rho²) * z_ind``, then mapped back
-        through the empirical CDF of residuals so the sigma marginal matches
-        the residual distribution (realistic scale).
-
-        Parameters
-        ----------
-        residuals : np.ndarray
-            Absolute prediction errors, shape (n,).
-        rho : float
-            Target Spearman rank correlation between sigma and residuals.
-        rng : np.random.RandomState
-            Pre-seeded RNG for reproducibility.
-
-        Returns
-        -------
-        sigma : np.ndarray, shape (n,)
-            Uncertainty estimates; always positive.
-        """
-        n = len(residuals)
-
-        if n == 1:
-            # Spearman rho is undefined for a single point; return a constant.
-            return np.maximum(residuals, 1e-6)
-
-        # Gaussian copula latent scores
-        rank_r = rankdata(residuals, method="average")
-        z_r = norm.ppf(rank_r / (n + 1.0))
-        z_ind = rng.standard_normal(n)
-
-        # Mix: z_mix has target Spearman rho ≈ rho with residuals
-        rho_clipped = float(np.clip(rho, -1.0 + 1e-9, 1.0 - 1e-9))
-        z_mix = rho_clipped * z_r + np.sqrt(max(0.0, 1.0 - rho_clipped**2)) * z_ind
-
-        # Map z_mix back to the marginal distribution of residuals
-        pct = norm.cdf(z_mix)
-        # Avoid exact 0/1 percentiles (can hit boundary of residuals range)
-        pct = np.clip(pct, 1e-9, 1.0 - 1e-9)
-        sigma = np.quantile(residuals, pct)
-
-        return np.maximum(sigma, 1e-6)
 
     def calibrate_uncertainty(self, *args, **kwargs) -> None:
         """No-op: oracle uncertainty is controlled by construction."""
@@ -386,8 +388,267 @@ class SyntheticOracle:
 
 
 # ---------------------------------------------------------------------------
-# Acquisition strategies for the oracle
+# Shared Gaussian copula sigma generator
 # ---------------------------------------------------------------------------
+
+
+def _make_sigma(
+    residuals: np.ndarray,
+    rho: float,
+    rng: np.random.RandomState,
+) -> np.ndarray:
+    """Generate sigma values with a target Spearman rho vs residuals.
+
+    Shared by :class:`SyntheticOracle` and :class:`CachedPredOracle`.
+
+    Uses a Gaussian copula: ``z_mix = rho * z_r + sqrt(1 - rho²) * z_ind``,
+    then mapped back through the empirical CDF of residuals so that the sigma
+    marginal matches the residual distribution (realistic scale).
+
+    Parameters
+    ----------
+    residuals : np.ndarray
+        Absolute prediction errors, shape (n,).
+    rho : float
+        Target Spearman rank correlation between sigma and residuals.
+    rng : np.random.RandomState
+        Pre-seeded RNG for reproducibility.
+
+    Returns
+    -------
+    sigma : np.ndarray, shape (n,)
+        Uncertainty estimates; always positive.
+    """
+    n = len(residuals)
+
+    if n == 1:
+        return np.maximum(residuals, 1e-6)
+
+    rank_r = rankdata(residuals, method="average")
+    z_r = norm.ppf(rank_r / (n + 1.0))
+    z_ind = rng.standard_normal(n)
+
+    rho_clipped = float(np.clip(rho, -1.0 + 1e-9, 1.0 - 1e-9))
+    z_mix = rho_clipped * z_r + np.sqrt(max(0.0, 1.0 - rho_clipped**2)) * z_ind
+
+    pct = norm.cdf(z_mix)
+    pct = np.clip(pct, 1e-9, 1.0 - 1e-9)
+    sigma = np.quantile(residuals, pct)
+
+    return np.maximum(sigma, 1e-6)
+
+
+# ---------------------------------------------------------------------------
+# CachedPredOracle — uses real end-state CheMeleon/ChemProp predictions
+# ---------------------------------------------------------------------------
+
+
+class CachedPredOracle:
+    """Oracle backed by real end-state model predictions on pool and test sets.
+
+    Unlike :class:`SyntheticOracle`, mean predictions are not computed from
+    ground truth + noise.  Instead, they come from a pre-cached average of
+    end-state CheMeleon (or ChemProp) committee predictions, giving
+    structurally-correlated, realistic errors.  Only uncertainty (sigma) is
+    synthesized, via the same Gaussian copula used by :class:`SyntheticOracle`.
+
+    Parameters
+    ----------
+    pred_cache : dict
+        Cache produced by :func:`generate_prediction_cache`.  Expected keys:
+        ``"pool_smiles"``, ``"pool_preds"``, ``"test_smiles"``, ``"test_preds"``.
+    smiles_to_y : dict[str, float]
+        Mapping from SMILES to true activity (used only for residual
+        computation inside the copula).
+    oracle_cfg : SyntheticConfig
+        Only ``initial_uncertainty_rho`` / ``final_uncertainty_rho`` are used;
+        MAE, shrinkage, and heteroscedasticity fields are ignored.
+    k_iter : int
+        Total number of AL iterations (for linear rho ramping).
+    seed : int, optional
+        Base RNG seed. Default is 42.
+    """
+
+    def __init__(
+        self,
+        pred_cache: dict,
+        smiles_to_y: dict[str, float],
+        oracle_cfg: SyntheticConfig,
+        k_iter: int,
+        seed: int = 42,
+    ) -> None:
+        self.smiles_to_y = smiles_to_y
+        self.oracle_cfg = oracle_cfg
+        self.k_iter = max(k_iter, 1)
+        self.seed = seed
+
+        # Build a fast SMILES → cached_pred lookup
+        self._pred_lookup: dict[str, float] = {}
+        for s, p in zip(pred_cache["pool_smiles"], pred_cache["pool_preds"]):
+            self._pred_lookup[s] = float(p)
+        for s, p in zip(pred_cache["test_smiles"], pred_cache["test_preds"]):
+            self._pred_lookup[s] = float(p)
+
+    def _rho_at(self, iteration: int) -> float:
+        """Return target Spearman rho at a given iteration (linearly ramped)."""
+        frac = min(iteration / self.k_iter, 1.0)
+        return self.oracle_cfg.initial_uncertainty_rho + (
+            self.oracle_cfg.final_uncertainty_rho
+            - self.oracle_cfg.initial_uncertainty_rho
+        ) * frac
+
+    def predict(
+        self,
+        smiles_list: list[str],
+        iteration: int,
+        call_id: int = 0,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return cached mean predictions and copula-generated sigma.
+
+        Parameters
+        ----------
+        smiles_list : list[str]
+            SMILES strings to predict.
+        iteration : int
+            Current AL iteration (for rho ramping).
+        call_id : int, optional
+            Differentiates multiple calls per iteration for independent sigma
+            noise. Default is 0.
+
+        Returns
+        -------
+        mean_pred : np.ndarray, shape (n, 1)
+        std_pred : np.ndarray, shape (n, 1)
+        """
+        rng = np.random.RandomState(self.seed + iteration * 10007 + call_id)
+        rho = self._rho_at(iteration)
+
+        y_pred = np.array([self._pred_lookup[s] for s in smiles_list], dtype=float)
+        y_true = np.array([self.smiles_to_y[s] for s in smiles_list], dtype=float)
+        residuals = np.abs(y_pred - y_true)
+        sigma = _make_sigma(residuals, rho, rng)
+
+        return y_pred.reshape(-1, 1), sigma.reshape(-1, 1)
+
+    def calibrate_uncertainty(self, *args, **kwargs) -> None:
+        """No-op: uncertainty controlled by construction."""
+
+    def actual_sigma_error_rho(
+        self, smiles_list: list[str], iteration: int, call_id: int = 0
+    ) -> float:
+        """Diagnostic: achieved Spearman rho(sigma, |error|)."""
+        mean_pred, std_pred = self.predict(smiles_list, iteration, call_id=call_id)
+        y_true = np.array([self.smiles_to_y[s] for s in smiles_list], dtype=float)
+        residuals = np.abs(mean_pred.flatten() - y_true)
+        return float(spearmanr(std_pred.flatten(), residuals).statistic)
+
+
+# ---------------------------------------------------------------------------
+# Prediction cache generation
+# ---------------------------------------------------------------------------
+
+
+def generate_prediction_cache(
+    results_dir: str | Path,
+    split_type: str,
+    strategy: str = "Exploitation",
+    seeds: list[int] | None = None,
+    output_path: str | Path | None = None,
+) -> dict:
+    """Build and optionally save a prediction cache from end-state committees.
+
+    Loads the final-iteration committee from each requested seed's run pickle,
+    runs inference on the pool (via ``featurize + committee.predict``), and
+    averages predictions across seeds.  For the test set, re-uses the already-
+    stored ``y_test_pred`` from ``history[-1]`` — no redundant inference.
+
+    Parameters
+    ----------
+    results_dir : str or Path
+        Directory containing ``setup_<split_type>.pkl`` and
+        ``run_<split_type>_<strategy>_seed<N>.pkl`` files.
+    split_type : str
+        Split type key (e.g. ``"random"`` or ``"predefined"``).
+    strategy : str, optional
+        Which strategy's end-state committees to use.  Default ``"Exploitation"``.
+    seeds : list[int] or None, optional
+        Seeds to average.  Default ``[42, 43, 44, 45, 46]``.
+    output_path : str, Path, or None, optional
+        If provided, the cache dict is pickled to this path atomically.
+
+    Returns
+    -------
+    dict
+        ``{"pool_smiles": list[str], "pool_preds": np.ndarray,
+           "test_smiles": list[str], "test_preds": np.ndarray}``
+
+    Raises
+    ------
+    FileNotFoundError
+        If the setup pickle or any requested run pickle is missing.
+    """
+    import pickle as _pickle  # local import to avoid module-level dep
+
+    from src.helpers import featurize  # noqa: PLC0415
+
+    if seeds is None:
+        seeds = [42, 43, 44, 45, 46]
+
+    results_dir = Path(results_dir)
+    setup_path = results_dir / f"setup_{split_type}.pkl"
+    if not setup_path.exists():
+        raise FileNotFoundError(f"Setup pickle not found: {setup_path}")
+
+    with open(setup_path, "rb") as fh:
+        setup = _pickle.load(fh)
+
+    pool_smiles: list[str] = setup["df_pool"]["smiles"].tolist()
+    pool_y = setup["df_pool"]["pEC50"].to_numpy()
+    test_smiles: list[str] = setup["df_test"]["smiles"].tolist()
+
+    pool_preds_list: list[np.ndarray] = []
+    test_preds_list: list[np.ndarray] = []
+
+    for seed in seeds:
+        run_path = results_dir / f"run_{split_type}_{strategy}_seed{seed}.pkl"
+        if not run_path.exists():
+            raise FileNotFoundError(f"Run pickle not found: {run_path}")
+
+        with open(run_path, "rb") as fh:
+            run_data = _pickle.load(fh)
+
+        # Pool inference via the end-state committee
+        committee = run_data["result"]["committee"]
+        loader, _scaler = featurize(pool_smiles, pool_y, shuffle=False)
+        pool_pred, _ = committee.predict(loader, return_std=True)
+        pool_preds_list.append(np.array(pool_pred).flatten())
+
+        # Test predictions already stored — no re-inference needed
+        test_pred = np.array(run_data["result"]["history"][-1]["y_test_pred"]).flatten()
+        test_preds_list.append(test_pred)
+
+        print(f"  seed {seed}: pool MAE={np.mean(np.abs(pool_preds_list[-1] - pool_y)):.4f}")
+
+    pool_preds = np.mean(np.stack(pool_preds_list, axis=0), axis=0)
+    test_preds = np.mean(np.stack(test_preds_list, axis=0), axis=0)
+
+    cache = {
+        "pool_smiles": pool_smiles,
+        "pool_preds": pool_preds,
+        "test_smiles": test_smiles,
+        "test_preds": test_preds,
+    }
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = output_path.with_suffix(".pkl.tmp")
+        with open(tmp_path, "wb") as fh:
+            _pickle.dump(cache, fh, protocol=_pickle.HIGHEST_PROTOCOL)
+        tmp_path.replace(output_path)  # atomic rename
+        print(f"Prediction cache saved to {output_path}.")
+
+    return cache
 
 
 def _expected_improvement(
