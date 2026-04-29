@@ -1158,6 +1158,7 @@ def generate_predicted_distribution_animation(
     *,
     hit_threshold: float = 6.0,
     activity_col: str = "pEC50",
+    model: str = "",
 ) -> None:
     """Generate and save animated hit/non-hit predicted-distribution figures.
 
@@ -1188,6 +1189,10 @@ def generate_predicted_distribution_animation(
     activity_col : str, optional
         Column in ``df_test`` with ground-truth activity values.
         Default is ``"pEC50"``.
+    model : str, optional
+        Model name shown as the first element of each figure title, e.g.
+        ``"CheMeleon"`` or ``"ChemProp"``.  When empty, omitted from title.
+        Default is ``""``.
     """
     results_dir = Path(results_dir)
     for strategy, runs in all_runs.items():
@@ -1204,6 +1209,7 @@ def generate_predicted_distribution_animation(
                 activity_col=activity_col,
                 strategy=strategy,
                 seed=seed,
+                model=model,
             )
             out_path = results_dir / f"predicted_distribution_{strategy}_seed{seed}.html"
             fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)
@@ -1295,6 +1301,7 @@ def main() -> None:
         results_dir,
         hit_threshold=args.hit_threshold,
         activity_col="pEC50",
+        model="CheMeleon" if cfg.use_chemeleon else "ChemProp",
     )
 
     for split_type, split_data in per_split_data.items():

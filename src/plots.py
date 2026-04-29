@@ -1835,6 +1835,7 @@ def plot_predicted_distribution_animation(
     activity_col: str = "pEC50",
     strategy: str = "Exploitation",
     seed: int = 42,
+    model: str = "",
     n_kde_points: int = 400,
     width: int = 800,
     height: int = 500,
@@ -1868,11 +1869,13 @@ def plot_predicted_distribution_animation(
         Column in ``df_test`` containing the ground-truth activity values.
         Default is ``"pEC50"``.
     strategy : str, optional
-        Strategy name shown in figure titles and axis labels.
-        Default is ``"Exploitation"``.
+        Strategy name shown in figure titles.  Default is ``"Exploitation"``.
     seed : int, optional
-        Seed used for this run; shown in the figure title.
-        Default is 42.
+        Seed used for this run; shown in the figure title.  Default is 42.
+    model : str, optional
+        Model name shown as the first element of the figure title (e.g.
+        ``"CheMeleon"`` or ``"ChemProp"``).  When empty, omitted from title.
+        Default is ``""``.
     n_kde_points : int, optional
         Number of evenly spaced points used to evaluate each KDE curve.
         Default is 400.
@@ -1910,11 +1913,9 @@ def plot_predicted_distribution_animation(
     _NONHIT_LINE = "rgba(80, 80, 80, 1.0)"
     _GAP_COLOR = "#444444"
 
-    # Stable x range across all frames
-    all_preds = np.concatenate([np.asarray(s["y_test_pred"]) for s in history])
-    x_min = float(np.nanpercentile(all_preds, 0.5))
-    x_max = float(np.nanpercentile(all_preds, 99.5))
-    x_grid = np.linspace(x_min, x_max, n_kde_points)
+    # KDE grid spans the full fixed axis range [0, 10] so curves taper
+    # smoothly to zero at the edges rather than cutting off abruptly.
+    x_grid = np.linspace(0.0, 10.0, n_kde_points)
 
     def _kde_trace(
         y_pred_subset: np.ndarray,
@@ -1988,11 +1989,11 @@ def plot_predicted_distribution_animation(
 
         trace_vhit = _vline_trace(
             mean_hit, y_max, _HIT_LINE,
-            f"Mean hit ŷ = {mean_hit:.2f}", showlegend=True,
+            f"Mean hit ŷ = {mean_hit:.2f}", showlegend=False,
         )
         trace_vnonhit = _vline_trace(
             mean_nonhit, y_max, _NONHIT_LINE,
-            f"Mean non-hit ŷ = {mean_nonhit:.2f}", showlegend=True,
+            f"Mean non-hit ŷ = {mean_nonhit:.2f}", showlegend=False,
         )
 
         # Horizontal gap bracket: text label on the LEFT side of the bar
@@ -2009,9 +2010,10 @@ def plot_predicted_distribution_animation(
             name="gap",
         )
 
+        model_prefix = f"Model: {model} | " if model else ""
         frame_title = (
-            f"Strategy: {strategy} | Seed: {seed} | "
-            f"Iteration {k} | {n_labeled} labeled"
+            f"{model_prefix}Strategy: {strategy} | Seed: {seed} | "
+            f"{n_labeled} labeled"
         )
         frames.append(
             go.Frame(
@@ -2056,8 +2058,9 @@ def plot_predicted_distribution_animation(
             plot_bgcolor="white",
             paper_bgcolor="white",
             legend=dict(
-                x=0.02,
+                x=0.98,
                 y=0.98,
+                xanchor="right",
                 bgcolor="rgba(255,255,255,0.8)",
                 bordercolor="#cccccc",
                 borderwidth=1,
