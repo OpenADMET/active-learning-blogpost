@@ -2141,12 +2141,12 @@ def plot_predicted_distribution_animation(
             ),
             width=width,
             height=height,
-            margin=dict(r=90),
+            margin=dict(r=90, b=80),
             sliders=[
                 dict(
                     active=0,
                     currentvalue=dict(visible=False),
-                    pad=dict(b=10, t=20),
+                    pad=dict(b=10, t=40),
                     steps=[
                         dict(
                             method="animate",
