@@ -106,16 +106,22 @@ Model choice has a modest and perhaps surprising influence on hit-finding for PX
 
 After fitting on the same 100 randomly selected compounds (training set maximum pEC50 approximately 6.46), ChemProp predicts a maximum activity of 8.48 on the unlabeled pool, more than 2 units above anything it was trained on. CheMeleon predicts a maximum of only 6.00, barely reaching the training set ceiling. CheMeleon’s pretrained encoder was trained on physicochemical properties across broad chemical space with no exposure to activity data, producing a smooth, well-structured latent geometry. When the output head is then trained on 100 PXR labels, settled encoder weights constrain how far predictions can extrapolate from that geometry. ChemProp, initialized randomly, faces no such constraint: its encoder and output head co-adapt simultaneously, distorting representations freely to accommodate the highest observed activities and extrapolating well beyond them on similar unseen compounds. The result is a hit-nonhit predicted activity gap of 0.64 units for ChemProp versus 0.44 units for CheMeleon at the first query, despite CheMeleon having higher global rank correlation (Spearman ρ ≈ 0.60 versus 0.53). CheMeleon is a better global ranker, but ChemProp’s aggressive extrapolation concentrates true hits at the very top of the list where **Exploitation** selects, placing approximately 9 true hits in its top-100 versus approximately 6 for CheMeleon. This first-query advantage compounds into a persistent cumulative gap. Tracking the hit-nonhit score gap across subsequent iterations confirms it does not grow as more actives enter the training set, ruling out any feedback from biased accumulation. The mechanism is fixed at initialization.
 
+![][image12]  
+*Figure 2\. PXR dataset committee mean predicted pEC50 KDE for hits (pEC50 ≥ 6.0, crimson) and non-hits (grey) on the unlabeled pool under the **Exploitation** strategy, animated across active learning iterations (5 seeds). ChemProp (top, positive y) and CheMeleon (bottom, negative y) share a common density axis. The annotated gap is the difference between the mean predicted activity of hits and non-hits; a larger gap indicates that the model concentrates true actives at the top of the ranked list from which **Exploitation** selects.*
+
 ChEMBL pretraining provides a meaningful head start in the very first iteration. Under **Exploitation**, both CheMeleon+ChEMBL and ChemProp+ChEMBL identify roughly 10 actives before any pool labels are acquired, compared to zero for their no-ChEMBL counterparts. This advantage comes entirely from a better starting model rather than from the acquisition function. However, it does not persist: warm-started trajectories converge to their no-ChEMBL counterparts within a few hundred pool labels, and cumulative hit counts are comparable from mid-campaign onward. ChEMBL pretraining accelerates early discovery but does not change the ceiling.
 
 ### SARS-CoV-2 Mpro
 
 ![][image4]  
-*Figure 2\. ASAP SARS-Cov-2 Mpro dataset cumulative number of active compounds (pEC50 ≥ 7.0) recovered as a function of labeled pool size for each acquisition strategy.* 
+*Figure 3\. ASAP SARS-Cov-2 Mpro dataset cumulative number of active compounds (pEC50 ≥ 7.0) recovered as a function of labeled pool size for each acquisition strategy.* 
 
 The ASAP Mpro dataset shows the same qualitative ordering of strategies despite a markedly higher base hit rate (76 actives in a pool of 842 compounds, 9.0%). **Exploitation** again leads throughout the campaign, while **Random** trails substantially, and the full strategy ranking is preserved across both model types.
 
 Model choice plays a different role on Mpro than on PXR. CheMeleon **Exploitation** recovers 55 of 76 pool actives by n = 200 versus 47 for ChemProp, a 17% difference from the same number of assays. **Random** finds only 17 actives at n = 200 regardless of model, confirming the benefit is specific to exploitation-driven selection. The mechanism mirrors PXR in reverse. At the very first Mpro query, CheMeleon already assigns a hit-nonhit gap of 1.35 units versus 0.93 for ChemProp. On a congeneric series, pretrained representations immediately encode the structural features associated with potency, while random initialization cannot resolve fine activity distinctions between nearly identical compounds from only 100 training examples. The larger initial gap translates directly into higher first-query precision and a cumulative hit-finding advantage that persists through the early campaign.
+
+![][image13]  
+*Figure 4\. ASAP SARS-CoV-2 Mpro dataset committee mean predicted pIC50 KDE for hits (pIC50 ≥ 7.0, crimson) and non-hits (grey) on the unlabeled pool under the **Exploitation** strategy, animated across active learning iterations (5 seeds). ChemProp (top, positive y) and CheMeleon (bottom, negative y) share a common density axis. The annotated gap is the difference between the mean predicted activity of hits and non-hits; CheMeleon opens a substantially larger gap from the first iteration, consistent with its pretrained representations immediately resolving the structural features associated with potency in this congeneric series.*
 
 The same underlying mechanism explains both observations. **Exploitation** selects by predicted mean, so the model that assigns the most extreme values to true actives wins. On a diverse deck like PXR, a randomly initialized model extrapolates more aggressively from sparse data, outranking actives that a pretrained model conservatively scores near the observed range. On a congeneric series like Mpro, pretrained representations already resolve the subtle distinctions between close analogues from the outset. In both cases the pattern is established at initialization, before any exploitation-driven training bias can take effect. Strategy choice remains the dominant lever, with **Exploitation** consistently recovering two to three times as many hits as **Random** at mid-campaign, but model initialization determines which tool does it more efficiently.
 
@@ -126,7 +132,7 @@ Hit-finding efficiency and model quality are not the same objective. A campaign 
 ### PXR
 
 ![][image5]  
-*Figure 3\. PXR dataset mean absolute error (MAE, pEC50 units) on the held-out random-split test set as a function of labeled pool size, for each of the six acquisition strategies. Shaded bands show ±1 SD across five random seeds.*
+*Figure 5\. PXR dataset mean absolute error (MAE, pEC50 units) on the held-out random-split test set as a function of labeled pool size, for each of the six acquisition strategies. Shaded bands show ±1 SD across five random seeds.*
 
 Acquisition strategy has a comparatively small effect on test-set MAE for PXR, though the magnitude depends substantially on the model used. For ChemProp, **Exploitation** reaches 0.64 pEC50 MAE at n = 900 compared to 0.57 for **Random**, a small but statistically significant gap of 0.07 units (p=0.0007) driven by the labeled set’s bias toward the active region. For CheMeleon, the same gap narrows to a even smaller, but still statistically significant, 0.02 units (0.57 vs 0.55, p=0.028), reflecting that pretrained representations help the model generalize better from a biased labeled pool. In absolute terms, both penalties remain modest and are far outweighed by **Exploitation**’s hit-finding advantage.
 
@@ -135,14 +141,14 @@ CheMeleon outperforms ChemProp across most strategies, though the magnitude and 
 ChEMBL pretraining provides a useful accuracy prior at campaign start. CheMeleon+ChEMBL achieves 0.83 pEC50 MAE before any pool labels are acquired, versus 0.93 for ChemProp+ChEMBL (p=0.0002). This advantage largely disappears by n = 200 pool labels (p=0.72 for CheMeleon+ChEMBL versus CheMeleon alone), as both warm-started configurations converge to their no-ChEMBL counterparts. The ChEMBL benefit is concentrated in the very first iterations.
 
 ![][image6]  
-*Figure 4\. PXR dataset Kendall's τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
+*Figure 6\. PXR dataset Kendall's τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
 
 Kendall’s τ reinforces these conclusions. ChemProp reaches τ ≈ 0.49 and CheMeleon reaches τ ≈ 0.52 by mid-campaign, with strategy bands largely overlapping within each model. **Exploitation** produces the lowest τ for ChemProp (approximately 0.42 at n = 900, p=0.0006 vs **Random**), while CheMeleon strategies cluster tightly between 0.49 and 0.50. Skewing the labeled pool toward actives therefore hurts ranking ability much more for ChemProp than for CheMeleon, likely because pretrained representations already encode broad chemical variation and are less distorted by a narrow training distribution.
 
 ### SARS-CoV-2 Mpro
 
 ![][image7]  
-*Figure 5\. ASAP SARS-CoV-2 Mpro dataset mean absolute error (MAE, pEC50 units) on the held-out random-split test set as a function of labeled pool size, for each of the six acquisition strategies. Shaded bands show ±1 SD across five random seeds.*
+*Figure 7\. ASAP SARS-CoV-2 Mpro dataset mean absolute error (MAE, pEC50 units) on the held-out random-split test set as a function of labeled pool size, for each of the six acquisition strategies. Shaded bands show ±1 SD across five random seeds.*
 
 For ASAP Mpro, model initialization has a substantially larger effect on accuracy than acquisition strategy. At n = 200, CheMeleon reduces test-set MAE by 0.16 units under **Random** sampling (0.80 vs 0.96, p=0.0016) and by 0.07 units under **Exploitation** (0.73 vs 0.81), though the **Exploitation** gap does not reach significance across seeds (p=0.33), reflecting the high variance of both models under targeted early labeling on this series. The **Random** gap is the cleanest measure of the model effect, because both models receive identical labeled sets under random selection (compound choice does not depend on model predictions), so any performance difference is attributable to model architecture alone with no confounding from strategy-model interaction.
 
@@ -151,7 +157,7 @@ Within each model type, strategy-driven MAE differences are larger on Mpro than 
 The CheMeleon accuracy advantage is substantially larger on Mpro (0.08 to 0.16 MAE units) than on PXR (0.01 to 0.07 units), as pretrained representations provide a larger benefit on a focused congeneric series where pretraining patterns are more directly applicable than on a diversity deck.
 
 ![][image8]  
-*Figure 6\. ASAP SARS-CoV-2 Mpro dataset Kendall’s τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
+*Figure 8\. ASAP SARS-CoV-2 Mpro dataset Kendall’s τ rank-correlation between predicted and observed pEC50 on the held-out test set across active learning iterations. Higher values indicate better ranking of compounds by predicted activity. Shaded bands show ±1 SD across five random seeds.*
 
 Kendall’s τ at n = 400 ranges from 0.62 to 0.65 across strategies for CheMeleon and 0.58 to 0.62 for ChemProp. Unlike PXR, where the dominant τ signal was the intra-model spread driven by **Exploitation** bias, on Mpro the inter-model gap dominates: CheMeleon produces significantly higher τ than ChemProp under **UCB**, **Exploration**, and **Diversity** (p < 0.05 for each), with the remaining strategy comparisons borderline.
 
@@ -164,7 +170,7 @@ The strategies most relevant here are those that explicitly use σ in selection,
 ### PXR
 
 ![][image9]  
-*Figure 7\. PXR dataset Spearman rank correlation between predicted uncertainty (σ) and absolute prediction error (|ŷ − y|) on the held-out test set, as a function of labeled pool size, for each acquisition strategy. A positive ρ indicates that σ correctly ranks which test compounds the model is most wrong about. Shaded bands show ±1 SD across five random seeds.*
+*Figure 9\. PXR dataset Spearman rank correlation between predicted uncertainty (σ) and absolute prediction error (|ŷ − y|) on the held-out test set, as a function of labeled pool size, for each acquisition strategy. A positive ρ indicates that σ correctly ranks which test compounds the model is most wrong about. Shaded bands show ±1 SD across five random seeds.*
 
 For PXR, the Spearman ρ between predicted uncertainty and absolute prediction error is consistently low across all strategies and model configurations, ranging from approximately 0.11 to 0.29 throughout the campaign. This indicates that the committee’s uncertainty estimates are a weak proxy for actual prediction error regardless of how the labeled pool is acquired.
 
@@ -175,7 +181,7 @@ The direction of the strategy effect also differs between models. For ChemProp, 
 ### SARS-CoV-2 Mpro
 
 ![][image10]  
-*Figure 7\. ASAP SARS-CoV-2 Mpro dataset Spearman rank correlation between predicted uncertainty (σ) and absolute prediction error (|ŷ − y|) on the held-out test set, as a function of labeled pool size, for each acquisition strategy. A positive ρ indicates that σ correctly ranks which test compounds the model is most wrong about. Shaded bands show ±1 SD across five random seeds.*
+*Figure 10\. ASAP SARS-CoV-2 Mpro dataset Spearman rank correlation between predicted uncertainty (σ) and absolute prediction error (|ŷ − y|) on the held-out test set, as a function of labeled pool size, for each acquisition strategy. A positive ρ indicates that σ correctly ranks which test compounds the model is most wrong about. Shaded bands show ±1 SD across five random seeds.*
 
 The ASAP Mpro dataset shows broadly similar uncertainty behavior, with ρ values ranging from approximately 0.13 to 0.34, modestly higher than PXR. On a congeneric series, training coverage and prediction difficulty are more tightly coupled. A compound the committee has not encountered anything like is simultaneously unfamiliar (high σ) and likely hard to predict (high error), because SAR within a focused series is smooth enough that distance from training data and prediction difficulty tend to co-vary. On the diverse PXR deck, compounds can be structurally well-covered yet behaviorally unpredictable due to activity cliffs and scaffold-specific SAR, decoupling σ from error. Higher ρ on Mpro is most plausibly explained by this difference in data structure rather than by a genuine improvement in uncertainty quality, though we cannot confirm this directly from our analysis.
 
