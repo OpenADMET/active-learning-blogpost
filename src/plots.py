@@ -19,9 +19,9 @@ from plotly.subplots import make_subplots
 # Used by the Play button args and by write_html(animation_opts=...) so both paths
 # share the same frame duration and transition speed.
 _DIST_FRAME_MS: int = 1000
-_DIST_TRANSITION_MS: int = 100
+_DIST_TRANSITION_MS: int = 800
 DIST_ANIMATION_OPTS: dict = dict(
-    frame=dict(duration=_DIST_FRAME_MS, redraw=True),
+    frame=dict(duration=_DIST_FRAME_MS, redraw=False),
     transition=dict(duration=_DIST_TRANSITION_MS),
 )
 
@@ -1944,20 +1944,34 @@ def plot_predicted_distribution_animation(
 
     def _vline_trace(
         x_val: float,
-        y_max: float,
+        y_top: float,
         color: str,
         name: str,
         showlegend: bool,
     ) -> go.Scatter:
-        """Return a vertical dashed line trace at x_val."""
+        """Return a vertical dashed line trace at x_val reaching y_top."""
         return go.Scatter(
             x=[x_val, x_val],
-            y=[0, y_max * 1.10],
+            y=[0, y_top],
             mode="lines",
             line=dict(color=color, dash="dash", width=1.5),
             name=name,
             showlegend=showlegend,
         )
+
+    # Pre-pass: compute per-frame peak densities to fix vline tops before building frames.
+    frame_ymaxes_pre: list[float] = []
+    for state in history:
+        y_pred_pre = np.asarray(state["y_test_pred"])
+        y_hits_pre = y_pred_pre[hit_mask]
+        y_nonhits_pre = y_pred_pre[nonhit_mask]
+        densities: list[float] = []
+        for subset in (y_hits_pre, y_nonhits_pre):
+            if len(subset) >= 2:
+                densities.extend(gaussian_kde(subset)(x_grid).tolist())
+        frame_ymaxes_pre.append(max(densities) if densities else 1e-6)
+    global_y_max_pre = max(frame_ymaxes_pre) * 1.15
+    vline_offset = 0.1 * global_y_max_pre
 
     frames: list[go.Frame] = []
     frame_ymaxes: list[float] = []
@@ -1988,11 +2002,11 @@ def plot_predicted_distribution_animation(
         frame_ymaxes.append(y_max)
 
         trace_vhit = _vline_trace(
-            mean_hit, y_max, _HIT_LINE,
+            mean_hit, y_max + vline_offset, _HIT_LINE,
             f"Mean hit ŷ = {mean_hit:.2f}", showlegend=False,
         )
         trace_vnonhit = _vline_trace(
-            mean_nonhit, y_max, _NONHIT_LINE,
+            mean_nonhit, y_max + vline_offset, _NONHIT_LINE,
             f"Mean non-hit ŷ = {mean_nonhit:.2f}", showlegend=False,
         )
 
@@ -2008,7 +2022,7 @@ def plot_predicted_distribution_animation(
             name="gap",
         )
         trace_gap_text = go.Scatter(
-            x=[mean_nonhit],
+            x=[mean_nonhit - 0.2],
             y=[gap_text_y],
             mode="text",
             text=[f"gap = {gap:+.2f}"],
@@ -2075,7 +2089,7 @@ def plot_predicted_distribution_animation(
             ),
             width=width,
             height=height,
-            margin=dict(t=120),
+            margin=dict(r=90),
             sliders=[
                 dict(
                     active=0,
@@ -2106,9 +2120,9 @@ def plot_predicted_distribution_animation(
                 dict(
                     type="buttons",
                     showactive=False,
-                    y=1.25,
-                    x=1.0,
-                    xanchor="right",
+                    y=1.0,
+                    x=1.01,
+                    xanchor="left",
                     yanchor="top",
                     buttons=[
                         dict(
@@ -2117,7 +2131,7 @@ def plot_predicted_distribution_animation(
                             args=[
                                 None,
                                 dict(
-                                    frame=dict(duration=_DIST_FRAME_MS, redraw=True),
+                                    frame=dict(duration=_DIST_FRAME_MS, redraw=False),
                                     fromcurrent=True,
                                     transition=dict(
                                         duration=_DIST_TRANSITION_MS,
