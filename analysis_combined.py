@@ -3,10 +3,13 @@
 
 Loads results from all six experiment configurations and produces:
 
-* **Individual panel figures** (one per config per metric) written to ``plots/``.
-* **Combined multi-panel grid figures** (one per target per metric) written to
-  ``plots/``, enabling direct comparison across model initialization and ChEMBL
-  seed-data conditions.
+* **Individual panel figures** (one per config per metric) written to the output
+  directory.
+* **Combined multi-panel grid figures** (one per target per metric), enabling
+  direct comparison across model initialization and ChEMBL seed-data conditions.
+* **Mirror distribution animations** (one per target): animated ChemProp vs
+  CheMeleon hit/non-hit predicted-activity distributions for the Exploitation
+  strategy.
 
 Config matrix
 -------------
@@ -26,16 +29,17 @@ Grid layouts
 * **ASAP** — 1 × 2: ``ChemProp | CheMeleon``
 * **PXR**  — 2 × 2: rows = no-ChEMBL / +ChEMBL, cols = ChemProp / CheMeleon
 
-Metrics (4 figures per target)
--------------------------------
+Metrics (4 grid figures per target, plus 1 mirror animation per target)
+------------------------------------------------------------------------
 * MAE learning curve
 * Kendall τ learning curve
 * Hit discovery curve
 * σ–|error| Spearman ρ
+* ChemProp vs CheMeleon mirror distribution (Exploitation, animated)
 
 Usage
 -----
-    python analysis_combined.py [--hit-threshold FLOAT] [--output-dir DIR]
+    python analysis_combined.py [--asap-hit-threshold FLOAT] [--pxr-hit-threshold FLOAT] [--output-dir DIR]
 
 Output files are written to ``results/combined/`` by default (gitignored).
 Pass ``--output-dir plots/`` to promote figures to the tracked plots directory
@@ -162,7 +166,7 @@ def _save_fig(
     """Write HTML immediately and queue SVG for batch Kaleido export."""
     html_path = str(output_dir / f"{stem}.html")
     svg_path = str(output_dir / f"{stem}.svg")
-    fig.write_html(html_path)
+    alp.write_html_both(fig=fig, path=html_path)
     print(f"  saved {html_path}")
     svg_queue.append((fig, svg_path))
 
@@ -201,40 +205,46 @@ def _hit_panel_data(data: dict, hit_threshold: float) -> dict:
 
 
 def generate_mirror_distribution_animation(
-    pxr_chemprop_data: dict,
-    pxr_chemeleon_data: dict,
+    chemprop_data: dict,
+    chemeleon_data: dict,
     output_dir: Path,
+    file_slug: str,
+    target_label: str,
     hit_threshold: float = 6.0,
     activity_col: str = "pEC50",
 ) -> None:
-    """Generate and save the PXR ChemProp vs CheMeleon mirror distribution animation.
+    """Generate and save a ChemProp vs CheMeleon mirror distribution animation.
 
     Builds pool-mode Exploitation frame data for both models and produces a
     single mirror figure (ChemProp top / CheMeleon bottom) saved to
-    ``output_dir/pxr_mirror_distribution_Exploitation.html``.
+    ``output_dir/<file_slug>_mirror_distribution_Exploitation.html``.
 
     Parameters
     ----------
-    pxr_chemprop_data, pxr_chemeleon_data : dict
+    chemprop_data, chemeleon_data : dict
         Assembled split-data dicts as returned by ``load_config_data``.
     output_dir : Path
         Directory to write the output HTML.
+    file_slug : str
+        Short identifier prepended to the output filename (e.g. ``"pxr"``).
+    target_label : str
+        Human-readable target name used in log messages (e.g. ``"PXR"``).
     hit_threshold : float
-        Hit activity threshold (default 6.0 for PXR pEC50).
+        Hit activity threshold.
     activity_col : str
         Activity column name (default ``"pEC50"``).
     """
-    print("\n=== PXR mirror distribution animation (Exploitation) ===")
+    print(f"\n=== {target_label} mirror distribution animation (Exploitation) ===")
 
     strategy = "Exploitation"
-    cp_runs = pxr_chemprop_data["all_runs"].get(strategy, [])
-    cm_runs = pxr_chemeleon_data["all_runs"].get(strategy, [])
+    cp_runs = chemprop_data["all_runs"].get(strategy, [])
+    cm_runs = chemeleon_data["all_runs"].get(strategy, [])
 
     history_cp, y_true_cp, n_seeds_cp = _build_distribution_frames(
-        cp_runs, pxr_chemprop_data["df_pool"], activity_col, strategy, hit_threshold,
+        cp_runs, chemprop_data["df_pool"], activity_col, strategy, hit_threshold,
     )
     history_cm, y_true_cm, n_seeds_cm = _build_distribution_frames(
-        cm_runs, pxr_chemeleon_data["df_pool"], activity_col, strategy, hit_threshold,
+        cm_runs, chemeleon_data["df_pool"], activity_col, strategy, hit_threshold,
     )
 
     if not history_cp or not history_cm:
@@ -261,8 +271,8 @@ def generate_mirror_distribution_animation(
         per_frame_y_true_b=y_true_cm,
         n_seeds=n_seeds,
     )
-    out_path = output_dir / "pxr_mirror_distribution_Exploitation.html"
-    fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)
+    out_path = output_dir / f"{file_slug}_mirror_distribution_Exploitation.html"
+    alp.write_html_both(fig=fig, path=out_path, animation_opts=alp.DIST_ANIMATION_OPTS)
     print(f"  saved {out_path}")
 
 
@@ -454,12 +464,22 @@ def main() -> None:
     _save_fig(fig, "pxr_combined_hit_discovery", output_dir, svg_queue)
 
     # -----------------------------------------------------------------------
-    # PXR mirror distribution animation (ChemProp vs CheMeleon, Exploitation)
+    # Mirror distribution animations (ChemProp vs CheMeleon, Exploitation)
     # -----------------------------------------------------------------------
+    generate_mirror_distribution_animation(
+        asap_data[0],  # ChemProp (ASAP_CONFIGS index 0)
+        asap_data[1],  # CheMeleon (ASAP_CONFIGS index 1)
+        output_dir,
+        file_slug="asap",
+        target_label="ASAP",
+        hit_threshold=asap_hit_thr,
+    )
     generate_mirror_distribution_animation(
         pxr_data[0],  # ChemProp no-ChEMBL (PXR_CONFIGS index 0)
         pxr_data[1],  # CheMeleon no-ChEMBL (PXR_CONFIGS index 1)
         output_dir,
+        file_slug="pxr",
+        target_label="PXR",
         hit_threshold=pxr_hit_thr,
     )
 

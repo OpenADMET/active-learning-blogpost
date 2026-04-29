@@ -71,6 +71,7 @@ from analysis import (  # noqa: E402
 )
 from src.config import load_config  # noqa: E402
 from src.helpers import STRATEGY_COLORS  # noqa: E402
+from src.plots import write_html_both  # noqa: E402
 
 warnings.filterwarnings("ignore")
 
@@ -554,7 +555,7 @@ def run_tier_comparison(
         metric_col="mae",
         ylabel="MAE (pEC50 units)",
     )
-    fig_mae.write_html(str(out_dir / "compare_mae.html"))
+    write_html_both(fig=fig_mae, path=out_dir / "compare_mae.html")
     svg_queue.append((fig_mae, str(out_dir / "compare_mae.svg")))
 
     # Kendall's τ comparison
@@ -566,7 +567,7 @@ def run_tier_comparison(
         metric_col="ktau",
         ylabel="Kendall's τ",
     )
-    fig_ktau.write_html(str(out_dir / "compare_ktau.html"))
+    write_html_both(fig=fig_ktau, path=out_dir / "compare_ktau.html")
     svg_queue.append((fig_ktau, str(out_dir / "compare_ktau.svg")))
 
     # Hit discovery comparison
@@ -577,7 +578,7 @@ def run_tier_comparison(
         strategies,
         hit_threshold=hit_threshold,
     )
-    fig_hits.write_html(str(out_dir / "compare_hit_discovery.html"))
+    write_html_both(fig=fig_hits, path=out_dir / "compare_hit_discovery.html")
     svg_queue.append((fig_hits, str(out_dir / "compare_hit_discovery.svg")))
 
     export_plotly_svgs(svg_queue)

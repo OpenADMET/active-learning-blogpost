@@ -413,7 +413,7 @@ def _save_multisplit(
         out.update_xaxes(range=list(xlim))
     if ylim is not None:
         out.update_yaxes(range=list(ylim))
-    out.write_html(f"{results_dir}/{fname}.html")
+    alp.write_html_both(fig=out, path=f"{results_dir}/{fname}.html")
     svg_queue.append((out, f"{results_dir}/{fname}.svg"))
 
 
@@ -686,7 +686,7 @@ def generate_calibration_curve(
         fig.update_xaxes(range=list(xlim))
     if ylim is not None:
         fig.update_yaxes(range=list(ylim))
-    fig.write_html(f"{results_dir}/calibration_curve.html")
+    alp.write_html_both(fig=fig, path=f"{results_dir}/calibration_curve.html")
     svg_queue.append((fig, f"{results_dir}/calibration_curve.svg"))
 
     print(f"\nMiscalibration Area Before: {final_state['miscal_area_pre_cal']:.4f}")
@@ -760,8 +760,9 @@ def generate_gtm_figures(
         fig.update_xaxes(range=list(xlim))
     if ylim is not None:
         fig.update_yaxes(range=list(ylim))
-    fig.write_html(
-        f"{results_dir}/gtm_selection_animation_{method.lower()}{split_suffix}.html",
+    alp.write_html_both(
+        fig=fig,
+        path=f"{results_dir}/gtm_selection_animation_{method.lower()}{split_suffix}.html",
         animation_opts=dict(
             frame=dict(duration=1200, redraw=True),
             transition=dict(duration=400),
@@ -1331,7 +1332,7 @@ def generate_predicted_distribution_animation(
             n_seeds=n_seeds,
         )
         out_path = results_dir / f"predicted_distribution_{strategy}.html"
-        fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)
+        alp.write_html_both(fig=fig, path=out_path, animation_opts=alp.DIST_ANIMATION_OPTS)
         print(f"  saved {out_path}")
 
 

@@ -5,6 +5,7 @@ Figures share a consistent visual style: white background, black axes, and
 per-strategy colors from ``src.helpers.STRATEGY_COLORS``.
 """
 
+from pathlib import Path
 from typing import Any
 
 import matplotlib.cm as mcm
@@ -26,6 +27,47 @@ DIST_ANIMATION_OPTS: dict = dict(
     frame=dict(duration=_DIST_FRAME_MS, redraw=True),
     transition=dict(duration=_DIST_TRANSITION_MS),
 )
+
+
+def write_html_both(
+    fig: go.Figure,
+    path: str | Path,
+    *,
+    animation_opts: dict | None = None,
+    auto_play: bool = False,
+) -> None:
+    """Write a figure to both an embedded HTML file and a CDN-linked HTML file.
+
+    Two files are always written:
+
+    1. **Embedded** — ``path`` with ``include_plotlyjs=True`` (~3 MB larger, works
+       offline).
+    2. **CDN** — ``path.parent / "cdn" / path.name`` with
+       ``include_plotlyjs="cdn"`` (tiny, requires internet).
+
+    The ``cdn/`` subdirectory is created automatically if it does not exist.
+
+    Parameters
+    ----------
+    fig : go.Figure
+        Plotly figure to export.
+    path : str or Path
+        Destination path for the self-contained (embedded) HTML file.
+    animation_opts : dict, optional
+        Passed directly to ``fig.write_html`` for both versions.
+    auto_play : bool
+        Whether to auto-play animations on page load.  Default is ``False``.
+    """
+    path = Path(path)
+    kwargs: dict = dict(auto_play=auto_play)
+    if animation_opts is not None:
+        kwargs["animation_opts"] = animation_opts
+
+    fig.write_html(str(path), include_plotlyjs=True, **kwargs)
+
+    cdn_path = path.parent / "cdn" / path.name
+    cdn_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.write_html(str(cdn_path), include_plotlyjs="cdn", **kwargs)
 
 
 def plot_learning_curve_with_bands(
@@ -2285,8 +2327,10 @@ def plot_mirror_distribution_animation(
     per_frame_y_true_a = per_frame_y_true_a[:n_frames]
     per_frame_y_true_b = per_frame_y_true_b[:n_frames]
 
-    _HIT_COLOR = "rgba(220, 20, 60, 0.55)"
-    _HIT_LINE = "rgba(220, 20, 60, 1.0)"
+    _HIT_COLOR_A = "rgba(220, 20, 60, 0.55)"
+    _HIT_LINE_A = "rgba(220, 20, 60, 1.0)"
+    _HIT_COLOR_B = "rgba(34, 139, 34, 0.55)"
+    _HIT_LINE_B = "rgba(34, 139, 34, 1.0)"
     _NONHIT_COLOR = "rgba(120, 120, 120, 0.40)"
     _NONHIT_LINE = "rgba(80, 80, 80, 1.0)"
     _GAP_COLOR = "#444444"
@@ -2371,7 +2415,7 @@ def plot_mirror_distribution_animation(
         t_hits_a = go.Scatter(
             x=x_grid.tolist(), y=kde_hits_a.tolist(),
             mode="lines", fill="tozeroy",
-            fillcolor=_HIT_COLOR, line=dict(color=_HIT_LINE, width=1.5),
+            fillcolor=_HIT_COLOR_A, line=dict(color=_HIT_LINE_A, width=1.5),
             name=f"Hits (≥{hit_threshold:.1f}, n={n_hits_a_d})",
             legendgroup="a", legendgrouptitle=dict(text=label_a),
             showlegend=True,
@@ -2385,7 +2429,7 @@ def plot_mirror_distribution_animation(
         )
         t_vhit_a = go.Scatter(
             x=[mean_hit_a, mean_hit_a], y=[0, _vline_top],
-            mode="lines", line=dict(color=_HIT_LINE, dash="dash", width=1.5),
+            mode="lines", line=dict(color=_HIT_LINE_A, dash="dash", width=1.5),
             showlegend=False, name="mean_hit_a",
         )
         t_vnonhit_a = go.Scatter(
@@ -2410,7 +2454,7 @@ def plot_mirror_distribution_animation(
         t_hits_b = go.Scatter(
             x=x_grid.tolist(), y=kde_hits_b.tolist(),
             mode="lines", fill="tozeroy",
-            fillcolor=_HIT_COLOR, line=dict(color=_HIT_LINE, width=1.5),
+            fillcolor=_HIT_COLOR_B, line=dict(color=_HIT_LINE_B, width=1.5),
             name=f"Hits (≥{hit_threshold:.1f}, n={n_hits_b_d})",
             legendgroup="b", legendgrouptitle=dict(text=label_b),
             showlegend=True,
@@ -2424,7 +2468,7 @@ def plot_mirror_distribution_animation(
         )
         t_vhit_b = go.Scatter(
             x=[mean_hit_b, mean_hit_b], y=[0, -_vline_top],
-            mode="lines", line=dict(color=_HIT_LINE, dash="dash", width=1.5),
+            mode="lines", line=dict(color=_HIT_LINE_B, dash="dash", width=1.5),
             showlegend=False, name="mean_hit_b",
         )
         t_vnonhit_b = go.Scatter(
