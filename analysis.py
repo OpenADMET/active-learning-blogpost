@@ -1283,6 +1283,7 @@ def generate_predicted_distribution_animation(
             seed_label=seed_label,
             model=model,
             per_frame_y_true=per_frame_y_true,
+            n_seeds=n_seeds,
         )
         out_path = results_dir / f"predicted_distribution_{strategy}.html"
         fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)

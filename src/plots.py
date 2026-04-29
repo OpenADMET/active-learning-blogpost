@@ -18,10 +18,12 @@ from plotly.subplots import make_subplots
 # Animation timing for plot_predicted_distribution_animation.
 # Used by the Play button args and by write_html(animation_opts=...) so both paths
 # share the same frame duration and transition speed.
+# redraw=True is required so that trace names (legend "n=X") and layout title
+# ("X labeled") are re-applied on every frame during playback, not just on scrub.
 _DIST_FRAME_MS: int = 1000
 _DIST_TRANSITION_MS: int = 800
 DIST_ANIMATION_OPTS: dict = dict(
-    frame=dict(duration=_DIST_FRAME_MS, redraw=False),
+    frame=dict(duration=_DIST_FRAME_MS, redraw=True),
     transition=dict(duration=_DIST_TRANSITION_MS),
 )
 
@@ -1839,18 +1841,24 @@ def plot_predicted_distribution_animation(
     n_kde_points: int = 400,
     width: int = 800,
     height: int = 500,
+    per_frame_y_true: list[np.ndarray] | None = None,
+    n_seeds: int = 1,
 ) -> go.Figure:
     """Animated figure showing committee predicted-activity distributions for hits vs non-hits.
 
     At each AL iteration two overlapping, semi-transparent KDE curves are drawn
-    using the committee's predictions on the **held-out test set** — one for
-    compounds that are ground-truth hits (activity ≥ threshold) and one for
-    non-hits.  Vertical lines mark each group's mean prediction and a horizontal
-    annotation shows the gap value.  A Plotly slider lets viewers scrub through
-    iterations; Play/Pause buttons run the animation.
+    using the committee's predictions — one for compounds that are ground-truth
+    hits (activity ≥ threshold) and one for non-hits.  Vertical lines mark each
+    group's mean prediction and a horizontal annotation shows the gap value.  A
+    Plotly slider lets viewers scrub through iterations; Play/Pause buttons run
+    the animation.
 
-    Uses ``"y_test_pred"`` from each history state, which is stored for every
-    run without any special flags.
+    By default, predictions come from ``"y_test_pred"`` in each history state
+    and ground-truth labels from ``df_test``.  When ``per_frame_y_true`` is
+    provided, ``"y_test_pred"`` is treated as unlabeled-pool predictions and the
+    corresponding per-frame true-activity arrays are used instead of ``df_test``.
+    In that case the hit/non-hit mask and compound counts are recomputed each
+    frame, so the legend accurately reflects the shrinking unlabeled pool.
 
     Parameters
     ----------
@@ -1859,11 +1867,11 @@ def plot_predicted_distribution_animation(
         containing at minimum ``"iteration"``, ``"n_labeled"``, and
         ``"y_test_pred"`` (``np.ndarray``).  When combining across seeds,
         ``y_test_pred`` should be the concatenation of all seeds' predictions
-        and ``df_test`` should be tiled to match.
+        and ``df_test`` (or ``per_frame_y_true``) should be sized to match.
     df_test : pd.DataFrame
         Held-out test DataFrame with an ``activity_col`` column giving
-        ground-truth activity values.  Row order must match ``y_test_pred``
-        in each history state.
+        ground-truth activity values.  Ignored when ``per_frame_y_true`` is
+        provided.
     hit_threshold : float, optional
         Activity value at or above which a compound is counted as a hit.
         Default is 6.0.
@@ -1887,6 +1895,17 @@ def plot_predicted_distribution_animation(
         Figure width in pixels.  Default is 800.
     height : int, optional
         Figure height in pixels.  Default is 500.
+    per_frame_y_true : list of np.ndarray, optional
+        When provided, a list of length ``len(history)`` where each element is
+        a 1-D array of ground-truth activity values for the compounds whose
+        predictions appear in that frame's ``"y_test_pred"``.  Use this when
+        predictions come from the unlabeled pool (which shrinks each iteration)
+        rather than from a fixed test set.  Default is ``None``.
+    n_seeds : int, optional
+        Number of independent seeds whose predictions have been concatenated
+        into each frame's ``"y_test_pred"``.  Legend counts (n_hits, n_nonhits)
+        are divided by this value and floored so they represent a single-seed
+        equivalent.  Default is ``1``.
 
     Returns
     -------
@@ -1904,11 +1923,14 @@ def plot_predicted_distribution_animation(
     if not history:
         raise ValueError("history is empty; nothing to animate.")
 
-    y_true = df_test[activity_col].to_numpy()
-    hit_mask = y_true >= hit_threshold
-    nonhit_mask = ~hit_mask
-    n_hits = int(hit_mask.sum())
-    n_nonhits = int(nonhit_mask.sum())
+    _pool_mode = per_frame_y_true is not None
+
+    if not _pool_mode:
+        y_true_fixed = df_test[activity_col].to_numpy()
+        hit_mask_fixed = y_true_fixed >= hit_threshold
+        nonhit_mask_fixed = ~hit_mask_fixed
+        n_hits_fixed = int(hit_mask_fixed.sum())
+        n_nonhits_fixed = int(nonhit_mask_fixed.sum())
 
     # Colour palette: crimson for hits (matches GTM active color), gray for non-hits
     _HIT_COLOR = "rgba(220, 20, 60, 0.55)"
@@ -1965,10 +1987,16 @@ def plot_predicted_distribution_animation(
 
     # Pre-pass: compute per-frame peak densities to fix vline tops before building frames.
     frame_ymaxes_pre: list[float] = []
-    for state in history:
+    for ki, state in enumerate(history):
         y_pred_pre = np.asarray(state["y_test_pred"])
-        y_hits_pre = y_pred_pre[hit_mask]
-        y_nonhits_pre = y_pred_pre[nonhit_mask]
+        if _pool_mode:
+            _yt = per_frame_y_true[ki]  # type: ignore[index]
+            _hm = _yt >= hit_threshold
+            y_hits_pre = y_pred_pre[_hm]
+            y_nonhits_pre = y_pred_pre[~_hm]
+        else:
+            y_hits_pre = y_pred_pre[hit_mask_fixed]
+            y_nonhits_pre = y_pred_pre[nonhit_mask_fixed]
         densities: list[float] = []
         for subset in (y_hits_pre, y_nonhits_pre):
             if len(subset) >= 2:
@@ -1977,13 +2005,30 @@ def plot_predicted_distribution_animation(
     global_y_max_pre = max(frame_ymaxes_pre) * 1.15
     vline_offset = 0.1 * global_y_max_pre
 
+    # Gap bracket position: fixed globally (not per-frame) so it sits at a
+    # consistent height above all KDE peaks across iterations.
+    _gap_bracket_y = global_y_max_pre + vline_offset
+    _gap_text_y = _gap_bracket_y + 0.15 * vline_offset
+
     frames: list[go.Frame] = []
     frame_ymaxes: list[float] = []
 
-    for state in history:
+    for ki, state in enumerate(history):
         y_pred = np.asarray(state["y_test_pred"])
         n_labeled = state["n_labeled"]
         k = state["iteration"]
+
+        if _pool_mode:
+            _yt = per_frame_y_true[ki]  # type: ignore[index]
+            hit_mask = _yt >= hit_threshold
+            nonhit_mask = ~hit_mask
+            n_hits = int(hit_mask.sum())
+            n_nonhits = int(nonhit_mask.sum())
+        else:
+            hit_mask = hit_mask_fixed
+            nonhit_mask = nonhit_mask_fixed
+            n_hits = n_hits_fixed
+            n_nonhits = n_nonhits_fixed
 
         y_hits = y_pred[hit_mask]
         y_nonhits = y_pred[nonhit_mask]
@@ -1994,11 +2039,11 @@ def plot_predicted_distribution_animation(
 
         trace_hits = _kde_trace(
             y_hits, x_grid, _HIT_COLOR, _HIT_LINE,
-            f"Hits (≥{hit_threshold:.1f}, n={n_hits})", showlegend=True,
+            f"Hits (≥{hit_threshold:.1f}, n={int(np.floor(n_hits / n_seeds))})", showlegend=True,
         )
         trace_nonhits = _kde_trace(
             y_nonhits, x_grid, _NONHIT_COLOR, _NONHIT_LINE,
-            f"Non-hits (n={n_nonhits})", showlegend=True,
+            f"Non-hits (n={int(np.floor(n_nonhits / n_seeds))})", showlegend=True,
         )
 
         all_density = list(np.array(trace_hits.y)) + list(np.array(trace_nonhits.y))
@@ -2014,12 +2059,12 @@ def plot_predicted_distribution_animation(
             f"Mean non-hit ŷ = {mean_nonhit:.2f}", showlegend=False,
         )
 
-        # Horizontal gap bracket: line trace + separate text trace slightly above
-        gap_y = y_max * 0.95
-        gap_text_y = gap_y + y_max * 0.04
+        # Horizontal gap bracket: line trace + separate text trace slightly above.
+        # Both use the globally fixed heights computed in the pre-pass so the
+        # bracket sits at a consistent position above the KDE peaks every frame.
         trace_gap_line = go.Scatter(
             x=[mean_nonhit, mean_hit],
-            y=[gap_y, gap_y],
+            y=[_gap_bracket_y, _gap_bracket_y],
             mode="lines",
             line=dict(color=_GAP_COLOR, width=2),
             showlegend=False,
@@ -2027,7 +2072,7 @@ def plot_predicted_distribution_animation(
         )
         trace_gap_text = go.Scatter(
             x=[mean_nonhit - 0.2],
-            y=[gap_text_y],
+            y=[_gap_text_y],
             mode="text",
             text=[f"gap = {gap:+.2f}"],
             textposition="middle left",
@@ -2049,7 +2094,7 @@ def plot_predicted_distribution_animation(
             )
         )
 
-    global_y_max = max(frame_ymaxes) * 1.15
+    global_y_max = max(max(frame_ymaxes) * 1.15, _gap_text_y * 1.08)
     initial_frame = frames[0]
     fig = go.Figure(
         data=initial_frame.data,
@@ -2062,7 +2107,7 @@ def plot_predicted_distribution_animation(
                 xanchor="center",
             ),
             xaxis=dict(
-                title=f"Committee mean predicted {activity_col} (test set)",
+                title=f"Committee mean predicted {activity_col} ({'unlabeled pool' if _pool_mode else 'test set'})",
                 range=[0, 10],
                 showgrid=True,
                 gridcolor="#eeeeee",
@@ -2135,7 +2180,7 @@ def plot_predicted_distribution_animation(
                             args=[
                                 None,
                                 dict(
-                                    frame=dict(duration=_DIST_FRAME_MS, redraw=False),
+                                    frame=dict(duration=_DIST_FRAME_MS, redraw=True),
                                     fromcurrent=True,
                                     transition=dict(
                                         duration=_DIST_TRANSITION_MS,
