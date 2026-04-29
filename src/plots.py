@@ -18,7 +18,7 @@ from plotly.subplots import make_subplots
 # Animation timing for plot_predicted_distribution_animation.
 # Used by the Play button args and by write_html(animation_opts=...) so both paths
 # share the same frame duration and transition speed.
-_DIST_FRAME_MS: int = 600
+_DIST_FRAME_MS: int = 1000
 _DIST_TRANSITION_MS: int = 100
 DIST_ANIMATION_OPTS: dict = dict(
     frame=dict(duration=_DIST_FRAME_MS, redraw=True),
@@ -1952,7 +1952,7 @@ def plot_predicted_distribution_animation(
         """Return a vertical dashed line trace at x_val."""
         return go.Scatter(
             x=[x_val, x_val],
-            y=[0, y_max * 1.05],
+            y=[0, y_max * 1.10],
             mode="lines",
             line=dict(color=color, dash="dash", width=1.5),
             name=name,
@@ -1996,18 +1996,26 @@ def plot_predicted_distribution_animation(
             f"Mean non-hit ŷ = {mean_nonhit:.2f}", showlegend=False,
         )
 
-        # Horizontal gap bracket: text label on the LEFT side of the bar
+        # Horizontal gap bracket: line trace + separate text trace slightly above
         gap_y = y_max * 0.95
-        trace_gap = go.Scatter(
+        gap_text_y = gap_y + y_max * 0.04
+        trace_gap_line = go.Scatter(
             x=[mean_nonhit, mean_hit],
             y=[gap_y, gap_y],
-            mode="lines+text",
+            mode="lines",
             line=dict(color=_GAP_COLOR, width=2),
-            text=[f"gap = {gap:+.2f}", ""],
+            showlegend=False,
+            name="gap",
+        )
+        trace_gap_text = go.Scatter(
+            x=[mean_nonhit],
+            y=[gap_text_y],
+            mode="text",
+            text=[f"gap = {gap:+.2f}"],
             textposition="middle left",
             textfont=dict(size=13, color=_GAP_COLOR),
             showlegend=False,
-            name="gap",
+            name="gap_label",
         )
 
         model_prefix = f"Model: {model} | " if model else ""
@@ -2017,7 +2025,7 @@ def plot_predicted_distribution_animation(
         )
         frames.append(
             go.Frame(
-                data=[trace_hits, trace_nonhits, trace_vhit, trace_vnonhit, trace_gap],
+                data=[trace_hits, trace_nonhits, trace_vhit, trace_vnonhit, trace_gap_line, trace_gap_text],
                 name=str(k),
                 layout=go.Layout(title_text=frame_title),
             )
@@ -2067,6 +2075,7 @@ def plot_predicted_distribution_animation(
             ),
             width=width,
             height=height,
+            margin=dict(t=120),
             sliders=[
                 dict(
                     active=0,
@@ -2097,7 +2106,7 @@ def plot_predicted_distribution_animation(
                 dict(
                     type="buttons",
                     showactive=False,
-                    y=1.15,
+                    y=1.25,
                     x=1.0,
                     xanchor="right",
                     yanchor="top",
