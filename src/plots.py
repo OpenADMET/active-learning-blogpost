@@ -2005,10 +2005,13 @@ def plot_predicted_distribution_animation(
     global_y_max_pre = max(frame_ymaxes_pre) * 1.15
     vline_offset = 0.1 * global_y_max_pre
 
-    # Gap bracket position: fixed globally (not per-frame) so it sits at a
-    # consistent height above all KDE peaks across iterations.
-    _gap_bracket_y = global_y_max_pre + vline_offset
-    _gap_text_y = _gap_bracket_y + 0.15 * vline_offset
+    # Fixed global heights computed once so all frames are consistent.
+    # Vlines and gap bracket all reference the same anchor: the highest KDE
+    # peak across any frame plus a 10%-of-axis fixed offset.
+    _peak_y = max(frame_ymaxes_pre)
+    _vline_top = _peak_y + vline_offset       # top of all vertical dashed lines
+    _gap_bracket_y = _vline_top               # gap bracket sits right at vline tops
+    _gap_text_y = _gap_bracket_y + 0.15 * vline_offset  # small clearance above bracket
 
     frames: list[go.Frame] = []
     frame_ymaxes: list[float] = []
@@ -2051,11 +2054,11 @@ def plot_predicted_distribution_animation(
         frame_ymaxes.append(y_max)
 
         trace_vhit = _vline_trace(
-            mean_hit, y_max + vline_offset, _HIT_LINE,
+            mean_hit, _vline_top, _HIT_LINE,
             f"Mean hit ŷ = {mean_hit:.2f}", showlegend=False,
         )
         trace_vnonhit = _vline_trace(
-            mean_nonhit, y_max + vline_offset, _NONHIT_LINE,
+            mean_nonhit, _vline_top, _NONHIT_LINE,
             f"Mean non-hit ŷ = {mean_nonhit:.2f}", showlegend=False,
         )
 
@@ -2094,7 +2097,7 @@ def plot_predicted_distribution_animation(
             )
         )
 
-    global_y_max = max(max(frame_ymaxes) * 1.15, _gap_text_y * 1.08)
+    global_y_max = max(max(frame_ymaxes) * 1.15, _gap_text_y * 1.12)
     initial_frame = frames[0]
     fig = go.Figure(
         data=initial_frame.data,
@@ -2142,12 +2145,8 @@ def plot_predicted_distribution_animation(
             sliders=[
                 dict(
                     active=0,
-                    currentvalue=dict(
-                        prefix="Iteration: ",
-                        visible=True,
-                        xanchor="center",
-                    ),
-                    pad=dict(b=10, t=50),
+                    currentvalue=dict(visible=False),
+                    pad=dict(b=10, t=20),
                     steps=[
                         dict(
                             method="animate",

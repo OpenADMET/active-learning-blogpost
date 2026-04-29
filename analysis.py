@@ -1242,14 +1242,17 @@ def generate_predicted_distribution_animation(
                     if k > 0:
                         seed_labeled_masks[si][h[k]["selected_pool_indices"]] = True
                     unlabeled_idx = np.where(~seed_labeled_masks[si])[0]
-                    scores = np.asarray(h[k].get("acquisition_scores", []))
-                    if len(scores) == len(unlabeled_idx):
+                    raw = h[k].get("acquisition_scores")
+                    scores = np.asarray(raw) if raw is not None else np.array([])
+                    if len(scores) == len(unlabeled_idx) and len(scores) > 0:
                         pool_preds_all.append(scores)
                         y_true_all.append(y_pool[unlabeled_idx])
-                    else:
-                        # Fallback: no acquisition scores for this seed/iter
-                        pool_preds_all.append(np.asarray(h[k]["y_test_pred"]))
-                        y_true_all.append(df_test[activity_col].to_numpy())
+                    # In pool mode: skip this seed/iter if scores unavailable.
+                    # Do NOT fall back to test set — that would mix populations.
+
+                if not pool_preds_all:
+                    # No seed has valid pool scores for this iteration; stop here.
+                    break
 
                 ref_state = valid_runs[0]["history"][k]
                 merged_history.append({
