@@ -1162,14 +1162,14 @@ def generate_predicted_distribution_animation(
 ) -> None:
     """Generate and save animated hit/non-hit predicted-distribution figures.
 
-    For every (strategy, seed) run, generates an animated Plotly figure showing
-    the committee's predicted-activity KDE curves for hits and non-hits on the
-    **held-out test set** over the course of the AL simulation.  The test-set
-    predictions (``"y_test_pred"``) are stored in every run without any special
-    flags, so this figure is always available.
+    For every strategy, predictions across all seeds are pooled at each
+    iteration by concatenating ``y_test_pred`` arrays.  The test DataFrame is
+    tiled to match so the hit/non-hit mask remains consistent.  This produces
+    smoother KDE curves than any single seed and removes the need for
+    per-seed output files.
 
-    Saves one HTML file per (strategy, seed):
-    ``predicted_distribution_{strategy}_seed{seed}.html``.
+    Saves one HTML file per strategy:
+    ``predicted_distribution_{strategy}.html``.
 
     Figures are HTML-only; Plotly animations cannot be exported to static SVG.
 
@@ -1196,24 +1196,40 @@ def generate_predicted_distribution_animation(
     """
     results_dir = Path(results_dir)
     for strategy, runs in all_runs.items():
-        for run in runs:
-            history = run["history"]
-            seed = run["seed"]
-            if not history:
-                continue
-            print(f"Generating predicted distribution animation: {strategy} seed={seed} ...")
-            fig = alp.plot_predicted_distribution_animation(
-                history=history,
-                df_test=df_test,
-                hit_threshold=hit_threshold,
-                activity_col=activity_col,
-                strategy=strategy,
-                seed=seed,
-                model=model,
-            )
-            out_path = results_dir / f"predicted_distribution_{strategy}_seed{seed}.html"
-            fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)
-            print(f"  saved {out_path}")
+        valid_runs = [r for r in runs if r["history"]]
+        if not valid_runs:
+            continue
+        n_seeds = len(valid_runs)
+        # Align all seeds to the same number of iterations (take the minimum).
+        n_iter = min(len(r["history"]) for r in valid_runs)
+        # Build merged history: concatenate y_test_pred across seeds per iteration.
+        merged_history: list[dict] = []
+        for k in range(n_iter):
+            ref_state = valid_runs[0]["history"][k]
+            merged_state = {
+                "iteration": ref_state["iteration"],
+                "n_labeled": ref_state["n_labeled"],
+                "y_test_pred": np.concatenate(
+                    [r["history"][k]["y_test_pred"] for r in valid_runs]
+                ),
+            }
+            merged_history.append(merged_state)
+        # Tile df_test so its length matches the concatenated predictions.
+        df_test_tiled = pd.concat([df_test] * n_seeds, ignore_index=True)
+        seed_label = f"{n_seeds} seeds"
+        print(f"Generating predicted distribution animation: {strategy} ({seed_label}) ...")
+        fig = alp.plot_predicted_distribution_animation(
+            history=merged_history,
+            df_test=df_test_tiled,
+            hit_threshold=hit_threshold,
+            activity_col=activity_col,
+            strategy=strategy,
+            seed_label=seed_label,
+            model=model,
+        )
+        out_path = results_dir / f"predicted_distribution_{strategy}.html"
+        fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)
+        print(f"  saved {out_path}")
 
 
 def main() -> None:

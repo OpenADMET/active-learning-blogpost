@@ -1834,7 +1834,7 @@ def plot_predicted_distribution_animation(
     hit_threshold: float = 6.0,
     activity_col: str = "pEC50",
     strategy: str = "Exploitation",
-    seed: int = 42,
+    seed_label: str = "Seed 42",
     model: str = "",
     n_kde_points: int = 400,
     width: int = 800,
@@ -1857,7 +1857,9 @@ def plot_predicted_distribution_animation(
     history : list[dict]
         Per-iteration state records from ``run_active_learning``, each
         containing at minimum ``"iteration"``, ``"n_labeled"``, and
-        ``"y_test_pred"`` (``np.ndarray`` of shape ``(n_test,)``).
+        ``"y_test_pred"`` (``np.ndarray``).  When combining across seeds,
+        ``y_test_pred`` should be the concatenation of all seeds' predictions
+        and ``df_test`` should be tiled to match.
     df_test : pd.DataFrame
         Held-out test DataFrame with an ``activity_col`` column giving
         ground-truth activity values.  Row order must match ``y_test_pred``
@@ -1870,8 +1872,10 @@ def plot_predicted_distribution_animation(
         Default is ``"pEC50"``.
     strategy : str, optional
         Strategy name shown in figure titles.  Default is ``"Exploitation"``.
-    seed : int, optional
-        Seed used for this run; shown in the figure title.  Default is 42.
+    seed_label : str, optional
+        Pre-formatted seed description shown in the figure title, e.g.
+        ``"Seed 42"`` for a single run or ``"5 seeds"`` for a combined run.
+        Default is ``"Seed 42"``.
     model : str, optional
         Model name shown as the first element of the figure title (e.g.
         ``"CheMeleon"`` or ``"ChemProp"``).  When empty, omitted from title.
@@ -2034,7 +2038,7 @@ def plot_predicted_distribution_animation(
 
         model_prefix = f"Model: {model} | " if model else ""
         frame_title = (
-            f"{model_prefix}Strategy: {strategy} | Seed: {seed} | "
+            f"{model_prefix}Strategy: {strategy} | {seed_label} | "
             f"{n_labeled} labeled"
         )
         frames.append(
