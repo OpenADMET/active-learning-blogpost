@@ -1151,6 +1151,110 @@ def export_plotly_svgs(svg_tasks: list[tuple]) -> None:
     asyncio.run(_export())
 
 
+def _build_distribution_frames(
+    runs: list,
+    df_pool: "pd.DataFrame | None",
+    activity_col: str,
+    strategy: str,
+    hit_threshold: float,
+) -> "tuple[list[dict], list[np.ndarray] | None, int]":
+    """Assemble per-iteration merged frame data for a predicted-distribution animation.
+
+    Concatenates predictions across all seeds at each iteration.  For
+    **Exploitation** when ``df_pool`` is provided, unlabeled-pool acquisition
+    scores are used (pool mode); all other strategy/config combinations use
+    ``y_test_pred`` from each run's history (test mode).
+
+    Parameters
+    ----------
+    runs : list of dict
+        Per-seed run records, each with ``"history"`` and ``"seed"`` keys.
+        Runs with empty histories are silently dropped.
+    df_pool : pd.DataFrame or None
+        Full pool DataFrame with an ``activity_col`` column.  Required for
+        Exploitation pool mode; ignored otherwise.
+    activity_col : str
+        Column name for ground-truth activity values in ``df_pool``.
+    strategy : str
+        Strategy name (e.g. ``"Exploitation"``).  Only ``"Exploitation"`` with
+        a non-None ``df_pool`` triggers pool mode.
+    hit_threshold : float
+        Activity value at or above which a compound is a hit (used only in pool
+        mode to build per-frame true-activity arrays).
+
+    Returns
+    -------
+    merged_history : list of dict
+        One entry per valid iteration with keys ``"iteration"``,
+        ``"n_labeled"``, and ``"y_test_pred"`` (concatenated across seeds).
+    per_frame_y_true : list of np.ndarray or None
+        Per-frame ground-truth activity arrays (pool mode only); ``None`` in
+        test mode.
+    n_seeds : int
+        Number of valid (non-empty) seeds contributing to the merged data.
+    """
+    valid_runs = [r for r in runs if r["history"]]
+    if not valid_runs:
+        return [], None, 0
+    n_seeds = len(valid_runs)
+    n_iter = min(len(r["history"]) for r in valid_runs)
+    y_pool = df_pool[activity_col].to_numpy() if df_pool is not None else None
+    use_pool_mode = (strategy == "Exploitation" and y_pool is not None)
+
+    merged_history: list[dict] = []
+    per_frame_y_true: list[np.ndarray] | None = [] if use_pool_mode else None
+
+    if use_pool_mode:
+        assert y_pool is not None
+        n_pool = len(y_pool)
+        seed_labeled_masks: list[np.ndarray] = []
+        for run in valid_runs:
+            h = run["history"]
+            lm = np.zeros(n_pool, dtype=bool)
+            lm[h[0]["selected_pool_indices"]] = True
+            seed_labeled_masks.append(lm)
+
+        for k in range(n_iter):
+            pool_preds_all: list[np.ndarray] = []
+            y_true_all: list[np.ndarray] = []
+            for si, run in enumerate(valid_runs):
+                h = run["history"]
+                if k > 0:
+                    seed_labeled_masks[si][h[k]["selected_pool_indices"]] = True
+                unlabeled_idx = np.where(~seed_labeled_masks[si])[0]
+                raw = h[k].get("acquisition_scores")
+                scores = np.asarray(raw) if raw is not None else np.array([])
+                if len(scores) == len(unlabeled_idx) and len(scores) > 0:
+                    pool_preds_all.append(scores)
+                    y_true_all.append(y_pool[unlabeled_idx])
+                # In pool mode: skip this seed/iter if scores unavailable.
+                # Do NOT fall back to test set — that would mix populations.
+
+            if not pool_preds_all:
+                break
+
+            ref_state = valid_runs[0]["history"][k]
+            merged_history.append({
+                "iteration": ref_state["iteration"],
+                "n_labeled": ref_state["n_labeled"],
+                "y_test_pred": np.concatenate(pool_preds_all),
+            })
+            assert per_frame_y_true is not None
+            per_frame_y_true.append(np.concatenate(y_true_all))
+    else:
+        for k in range(n_iter):
+            ref_state = valid_runs[0]["history"][k]
+            merged_history.append({
+                "iteration": ref_state["iteration"],
+                "n_labeled": ref_state["n_labeled"],
+                "y_test_pred": np.concatenate(
+                    [r["history"][k]["y_test_pred"] for r in valid_runs]
+                ),
+            })
+
+    return merged_history, per_frame_y_true, n_seeds
+
+
 def generate_predicted_distribution_animation(
     all_runs: dict[str, list],
     df_test: pd.DataFrame,
@@ -1204,76 +1308,14 @@ def generate_predicted_distribution_animation(
         the held-out test set.  Default is ``None``.
     """
     results_dir = Path(results_dir)
-    y_pool = df_pool[activity_col].to_numpy() if df_pool is not None else None
 
     for strategy, runs in all_runs.items():
-        valid_runs = [r for r in runs if r["history"]]
-        if not valid_runs:
+        merged_history, per_frame_y_true, n_seeds = _build_distribution_frames(
+            runs, df_pool, activity_col, strategy, hit_threshold,
+        )
+        if not merged_history:
             continue
-        n_seeds = len(valid_runs)
-        # Align all seeds to the same number of iterations (take the minimum).
-        n_iter = min(len(r["history"]) for r in valid_runs)
 
-        use_pool_mode = (strategy == "Exploitation" and y_pool is not None)
-
-        # Build merged history: concatenate predictions across seeds per iteration.
-        merged_history: list[dict] = []
-        per_frame_y_true: list[np.ndarray] | None = [] if use_pool_mode else None
-
-        if use_pool_mode:
-            # Pre-build the sequence of labeled masks for each seed so we can
-            # reconstruct the unlabeled pool at every iteration efficiently.
-            assert y_pool is not None
-            n_pool = len(y_pool)
-            seed_labeled_masks: list[np.ndarray] = []
-            for run in valid_runs:
-                h = run["history"]
-                lm = np.zeros(n_pool, dtype=bool)
-                lm[h[0]["selected_pool_indices"]] = True
-                seed_labeled_masks.append(lm)
-
-            for k in range(n_iter):
-                pool_preds_all: list[np.ndarray] = []
-                y_true_all: list[np.ndarray] = []
-                for si, run in enumerate(valid_runs):
-                    h = run["history"]
-                    # Update mask to include compounds labeled at this iteration
-                    # (iter 0 is already included from the initial mask above).
-                    if k > 0:
-                        seed_labeled_masks[si][h[k]["selected_pool_indices"]] = True
-                    unlabeled_idx = np.where(~seed_labeled_masks[si])[0]
-                    raw = h[k].get("acquisition_scores")
-                    scores = np.asarray(raw) if raw is not None else np.array([])
-                    if len(scores) == len(unlabeled_idx) and len(scores) > 0:
-                        pool_preds_all.append(scores)
-                        y_true_all.append(y_pool[unlabeled_idx])
-                    # In pool mode: skip this seed/iter if scores unavailable.
-                    # Do NOT fall back to test set — that would mix populations.
-
-                if not pool_preds_all:
-                    # No seed has valid pool scores for this iteration; stop here.
-                    break
-
-                ref_state = valid_runs[0]["history"][k]
-                merged_history.append({
-                    "iteration": ref_state["iteration"],
-                    "n_labeled": ref_state["n_labeled"],
-                    "y_test_pred": np.concatenate(pool_preds_all),
-                })
-                assert per_frame_y_true is not None
-                per_frame_y_true.append(np.concatenate(y_true_all))
-        else:
-            for k in range(n_iter):
-                ref_state = valid_runs[0]["history"][k]
-                merged_history.append({
-                    "iteration": ref_state["iteration"],
-                    "n_labeled": ref_state["n_labeled"],
-                    "y_test_pred": np.concatenate(
-                        [r["history"][k]["y_test_pred"] for r in valid_runs]
-                    ),
-                })
-
-        # Tile df_test for non-pool-mode (pool-mode ignores df_test).
         df_test_tiled = pd.concat([df_test] * n_seeds, ignore_index=True)
         seed_label = f"{n_seeds} seeds"
         print(f"Generating predicted distribution animation: {strategy} ({seed_label}) ...")

@@ -2207,3 +2207,366 @@ def plot_predicted_distribution_animation(
     )
     return fig
 
+
+
+def plot_mirror_distribution_animation(
+    history_a: list[dict],
+    history_b: list[dict],
+    label_a: str = "ChemProp",
+    label_b: str = "CheMeleon",
+    hit_threshold: float = 6.0,
+    activity_col: str = "pEC50",
+    strategy: str = "Exploitation",
+    seed_label: str = "5 seeds",
+    n_kde_points: int = 400,
+    width: int = 900,
+    height: int = 700,
+    per_frame_y_true_a: "list | None" = None,
+    per_frame_y_true_b: "list | None" = None,
+    n_seeds: int = 1,
+) -> go.Figure:
+    """Animated mirror figure comparing two models' hit/non-hit predicted distributions.
+
+    Displays model A (e.g. ChemProp) in the **positive y half** and model B
+    (e.g. CheMeleon) in the **negative y half** of a single shared axes.  Both
+    halves use the same global y-scale derived from the maximum KDE peak across
+    both models and all frames.  A thick zero line acts as the mirror axis.
+
+    Both models must be in pool mode (``per_frame_y_true_a`` and
+    ``per_frame_y_true_b`` are required).  Frames are aligned to
+    ``min(len(history_a), len(history_b))``.
+
+    Parameters
+    ----------
+    history_a, history_b : list of dict
+        Per-iteration state records for each model.  Each entry must contain
+        ``"iteration"``, ``"n_labeled"``, and ``"y_test_pred"`` (pool scores
+        concatenated across seeds).
+    label_a, label_b : str
+        Display names for the two models (used in legend group titles and
+        layout annotations).
+    hit_threshold : float
+        Activity cutoff defining hits.  Default is 6.0.
+    activity_col : str
+        Activity column name used in axis labels.  Default is ``"pEC50"``.
+    strategy : str
+        Strategy name shown in the figure title.  Default is ``"Exploitation"``.
+    seed_label : str
+        Pre-formatted seed count string for the title, e.g. ``"5 seeds"``.
+    n_kde_points : int
+        KDE evaluation grid resolution.  Default is 400.
+    width, height : int
+        Figure dimensions in pixels.
+    per_frame_y_true_a, per_frame_y_true_b : list of np.ndarray
+        Per-frame ground-truth activity arrays (one per iteration) for pool mode.
+    n_seeds : int
+        Number of seeds concatenated into each frame; legend counts are divided
+        by this value and floored to give single-seed equivalents.
+
+    Returns
+    -------
+    go.Figure
+        Animated Plotly figure (HTML export only).
+    """
+    import numpy as _np
+    from scipy.stats import gaussian_kde
+
+    if not history_a or not history_b:
+        raise ValueError("Both history_a and history_b must be non-empty.")
+    if per_frame_y_true_a is None or per_frame_y_true_b is None:
+        raise ValueError(
+            "plot_mirror_distribution_animation requires pool mode: "
+            "per_frame_y_true_a and per_frame_y_true_b must be provided."
+        )
+
+    n_frames = min(len(history_a), len(history_b))
+    history_a = history_a[:n_frames]
+    history_b = history_b[:n_frames]
+    per_frame_y_true_a = per_frame_y_true_a[:n_frames]
+    per_frame_y_true_b = per_frame_y_true_b[:n_frames]
+
+    _HIT_COLOR = "rgba(220, 20, 60, 0.55)"
+    _HIT_LINE = "rgba(220, 20, 60, 1.0)"
+    _NONHIT_COLOR = "rgba(120, 120, 120, 0.40)"
+    _NONHIT_LINE = "rgba(80, 80, 80, 1.0)"
+    _GAP_COLOR = "#444444"
+
+    x_grid = _np.linspace(0.0, 10.0, n_kde_points)
+
+    def _dens(y_subset, sign=1.0):
+        if len(y_subset) < 2:
+            return _np.zeros_like(x_grid)
+        return sign * gaussian_kde(y_subset)(x_grid)
+
+    # Pre-pass: shared global y-scale across both models and all frames
+    frame_ymaxes_pre: list[float] = []
+    for ki in range(n_frames):
+        y_pred_a = _np.asarray(history_a[ki]["y_test_pred"])
+        y_pred_b = _np.asarray(history_b[ki]["y_test_pred"])
+        yt_a = per_frame_y_true_a[ki]
+        yt_b = per_frame_y_true_b[ki]
+        hm_a = yt_a >= hit_threshold
+        hm_b = yt_b >= hit_threshold
+        densities: list[float] = []
+        for pred, hm in [(y_pred_a, hm_a), (y_pred_b, hm_b)]:
+            for subset in (pred[hm], pred[~hm]):
+                if len(subset) >= 2:
+                    densities.extend(gaussian_kde(subset)(x_grid).tolist())
+        frame_ymaxes_pre.append(max(densities) if densities else 1e-6)
+
+    global_y_max_pre = max(frame_ymaxes_pre) * 1.15
+    vline_offset = 0.1 * global_y_max_pre
+    _peak_y = max(frame_ymaxes_pre)
+    _vline_top = _peak_y + vline_offset
+    _gap_bracket_y = _vline_top
+    _gap_text_y = _gap_bracket_y + 0.15 * vline_offset
+
+    frames: list[go.Frame] = []
+    frame_ymaxes: list[float] = []
+
+    for ki in range(n_frames):
+        state_a = history_a[ki]
+        state_b = history_b[ki]
+        y_pred_a = _np.asarray(state_a["y_test_pred"])
+        y_pred_b = _np.asarray(state_b["y_test_pred"])
+        n_labeled = state_a["n_labeled"]
+        k = state_a["iteration"]
+
+        yt_a = per_frame_y_true_a[ki]
+        yt_b = per_frame_y_true_b[ki]
+        hm_a = yt_a >= hit_threshold
+        hm_b = yt_b >= hit_threshold
+
+        y_hits_a = y_pred_a[hm_a]
+        y_nonhits_a = y_pred_a[~hm_a]
+        y_hits_b = y_pred_b[hm_b]
+        y_nonhits_b = y_pred_b[~hm_b]
+
+        mean_hit_a = float(_np.mean(y_hits_a)) if len(y_hits_a) else float("nan")
+        mean_nonhit_a = float(_np.mean(y_nonhits_a)) if len(y_nonhits_a) else float("nan")
+        mean_hit_b = float(_np.mean(y_hits_b)) if len(y_hits_b) else float("nan")
+        mean_nonhit_b = float(_np.mean(y_nonhits_b)) if len(y_nonhits_b) else float("nan")
+        gap_a = mean_hit_a - mean_nonhit_a
+        gap_b = mean_hit_b - mean_nonhit_b
+
+        n_hits_a = int(hm_a.sum())
+        n_nonhits_a = int((~hm_a).sum())
+        n_hits_b = int(hm_b.sum())
+        n_nonhits_b = int((~hm_b).sum())
+
+        kde_hits_a = _dens(y_hits_a, sign=1.0)
+        kde_nonhits_a = _dens(y_nonhits_a, sign=1.0)
+        kde_hits_b = _dens(y_hits_b, sign=-1.0)
+        kde_nonhits_b = _dens(y_nonhits_b, sign=-1.0)
+
+        y_max = max(float(kde_hits_a.max()), float(kde_nonhits_a.max()), 1e-6)
+        frame_ymaxes.append(y_max)
+
+        n_hits_a_d = int(_np.floor(n_hits_a / n_seeds))
+        n_nonhits_a_d = int(_np.floor(n_nonhits_a / n_seeds))
+        n_hits_b_d = int(_np.floor(n_hits_b / n_seeds))
+        n_nonhits_b_d = int(_np.floor(n_nonhits_b / n_seeds))
+
+        # Model A — top half (positive y)
+        t_hits_a = go.Scatter(
+            x=x_grid.tolist(), y=kde_hits_a.tolist(),
+            mode="lines", fill="tozeroy",
+            fillcolor=_HIT_COLOR, line=dict(color=_HIT_LINE, width=1.5),
+            name=f"Hits (≥{hit_threshold:.1f}, n={n_hits_a_d})",
+            legendgroup="a", legendgrouptitle=dict(text=label_a),
+            showlegend=True,
+        )
+        t_nonhits_a = go.Scatter(
+            x=x_grid.tolist(), y=kde_nonhits_a.tolist(),
+            mode="lines", fill="tozeroy",
+            fillcolor=_NONHIT_COLOR, line=dict(color=_NONHIT_LINE, width=1.5),
+            name=f"Non-hits (n={n_nonhits_a_d})",
+            legendgroup="a", showlegend=True,
+        )
+        t_vhit_a = go.Scatter(
+            x=[mean_hit_a, mean_hit_a], y=[0, _vline_top],
+            mode="lines", line=dict(color=_HIT_LINE, dash="dash", width=1.5),
+            showlegend=False, name="mean_hit_a",
+        )
+        t_vnonhit_a = go.Scatter(
+            x=[mean_nonhit_a, mean_nonhit_a], y=[0, _vline_top],
+            mode="lines", line=dict(color=_NONHIT_LINE, dash="dash", width=1.5),
+            showlegend=False, name="mean_nonhit_a",
+        )
+        t_gap_line_a = go.Scatter(
+            x=[mean_nonhit_a, mean_hit_a], y=[_gap_bracket_y, _gap_bracket_y],
+            mode="lines", line=dict(color=_GAP_COLOR, width=2),
+            showlegend=False, name="gap_a",
+        )
+        t_gap_text_a = go.Scatter(
+            x=[mean_nonhit_a - 0.2], y=[_gap_text_y],
+            mode="text", text=[f"gap = {gap_a:+.2f}"],
+            textposition="middle left",
+            textfont=dict(size=13, color=_GAP_COLOR),
+            showlegend=False, name="gap_label_a",
+        )
+
+        # Model B — bottom half (negative y)
+        t_hits_b = go.Scatter(
+            x=x_grid.tolist(), y=kde_hits_b.tolist(),
+            mode="lines", fill="tozeroy",
+            fillcolor=_HIT_COLOR, line=dict(color=_HIT_LINE, width=1.5),
+            name=f"Hits (≥{hit_threshold:.1f}, n={n_hits_b_d})",
+            legendgroup="b", legendgrouptitle=dict(text=label_b),
+            showlegend=True,
+        )
+        t_nonhits_b = go.Scatter(
+            x=x_grid.tolist(), y=kde_nonhits_b.tolist(),
+            mode="lines", fill="tozeroy",
+            fillcolor=_NONHIT_COLOR, line=dict(color=_NONHIT_LINE, width=1.5),
+            name=f"Non-hits (n={n_nonhits_b_d})",
+            legendgroup="b", showlegend=True,
+        )
+        t_vhit_b = go.Scatter(
+            x=[mean_hit_b, mean_hit_b], y=[0, -_vline_top],
+            mode="lines", line=dict(color=_HIT_LINE, dash="dash", width=1.5),
+            showlegend=False, name="mean_hit_b",
+        )
+        t_vnonhit_b = go.Scatter(
+            x=[mean_nonhit_b, mean_nonhit_b], y=[0, -_vline_top],
+            mode="lines", line=dict(color=_NONHIT_LINE, dash="dash", width=1.5),
+            showlegend=False, name="mean_nonhit_b",
+        )
+        t_gap_line_b = go.Scatter(
+            x=[mean_nonhit_b, mean_hit_b], y=[-_gap_bracket_y, -_gap_bracket_y],
+            mode="lines", line=dict(color=_GAP_COLOR, width=2),
+            showlegend=False, name="gap_b",
+        )
+        t_gap_text_b = go.Scatter(
+            x=[mean_nonhit_b - 0.2], y=[-_gap_text_y],
+            mode="text", text=[f"gap = {gap_b:+.2f}"],
+            textposition="middle left",
+            textfont=dict(size=13, color=_GAP_COLOR),
+            showlegend=False, name="gap_label_b",
+        )
+
+        frame_title = f"Strategy: {strategy} | {seed_label} | {n_labeled} labeled"
+        frames.append(go.Frame(
+            data=[
+                t_hits_a, t_nonhits_a, t_vhit_a, t_vnonhit_a, t_gap_line_a, t_gap_text_a,
+                t_hits_b, t_nonhits_b, t_vhit_b, t_vnonhit_b, t_gap_line_b, t_gap_text_b,
+            ],
+            name=str(k),
+            layout=go.Layout(title_text=frame_title),
+        ))
+
+    global_y_max = max(max(frame_ymaxes) * 1.15, _gap_text_y * 1.12)
+    initial_frame = frames[0]
+    fig = go.Figure(
+        data=initial_frame.data,
+        frames=frames,
+        layout=go.Layout(
+            title=dict(
+                text=initial_frame.layout.title.text,
+                font=dict(size=14),
+                x=0.5,
+                xanchor="center",
+            ),
+            xaxis=dict(
+                title=f"Committee mean predicted {activity_col} (unlabeled pool)",
+                range=[0, 10],
+                showgrid=True, gridcolor="#eeeeee",
+                zeroline=False, linecolor="black", linewidth=1, mirror=True,
+            ),
+            yaxis=dict(
+                title="Density",
+                range=[-global_y_max, global_y_max],
+                showgrid=True, gridcolor="#eeeeee",
+                zeroline=False, linecolor="black", linewidth=1, mirror=True,
+            ),
+            shapes=[dict(
+                type="line",
+                x0=0, x1=1, y0=0, y1=0,
+                xref="paper", yref="y",
+                line=dict(color="black", width=2),
+                layer="above",
+            )],
+            annotations=[
+                dict(
+                    text=f"▲ {label_a}",
+                    x=0.01, y=_vline_top * 0.92,
+                    xref="paper", yref="y",
+                    showarrow=False,
+                    font=dict(size=13, color="#333333"),
+                    xanchor="left",
+                ),
+                dict(
+                    text=f"▼ {label_b}",
+                    x=0.01, y=-_vline_top * 0.92,
+                    xref="paper", yref="y",
+                    showarrow=False,
+                    font=dict(size=13, color="#333333"),
+                    xanchor="left",
+                ),
+            ],
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            legend=dict(
+                x=0.98, y=0.98, xanchor="right",
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="#cccccc", borderwidth=1,
+                tracegroupgap=10,
+            ),
+            width=width,
+            height=height,
+            margin=dict(r=90, b=140),
+            sliders=[dict(
+                active=0,
+                currentvalue=dict(visible=False),
+                pad=dict(b=10, t=80),
+                steps=[
+                    dict(
+                        method="animate",
+                        args=[
+                            [str(s["iteration"])],
+                            dict(
+                                mode="immediate",
+                                frame=dict(duration=0, redraw=True),
+                                transition=dict(duration=0),
+                            ),
+                        ],
+                        label=str(s["iteration"]),
+                    )
+                    for s in history_a[:n_frames]
+                ],
+            )],
+            updatemenus=[dict(
+                type="buttons",
+                showactive=False,
+                y=1.0, x=1.01,
+                xanchor="left", yanchor="top",
+                buttons=[
+                    dict(
+                        label="▶ Play",
+                        method="animate",
+                        args=[
+                            None,
+                            dict(
+                                frame=dict(duration=_DIST_FRAME_MS, redraw=True),
+                                fromcurrent=True,
+                                transition=dict(duration=_DIST_TRANSITION_MS, easing="linear"),
+                            ),
+                        ],
+                    ),
+                    dict(
+                        label="⏸ Pause",
+                        method="animate",
+                        args=[
+                            [None],
+                            dict(
+                                frame=dict(duration=0, redraw=False),
+                                mode="immediate",
+                                transition=dict(duration=0),
+                            ),
+                        ],
+                    ),
+                ],
+            )],
+        ),
+    )
+    return fig

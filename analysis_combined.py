@@ -56,7 +56,7 @@ import plotly.graph_objects as go  # noqa: E402
 from kaleido import Kaleido  # noqa: E402
 
 import src.plots as alp  # noqa: E402
-from analysis import build_split_data, load_job_results, load_setups  # noqa: E402
+from analysis import build_split_data, load_job_results, load_setups, _build_distribution_frames  # noqa: E402
 from src.config import load_config  # noqa: E402
 from src.helpers import STRATEGY_COLORS  # noqa: E402
 
@@ -198,6 +198,72 @@ def _hit_panel_data(data: dict, hit_threshold: float) -> dict:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
+
+def generate_mirror_distribution_animation(
+    pxr_chemprop_data: dict,
+    pxr_chemeleon_data: dict,
+    output_dir: Path,
+    hit_threshold: float = 6.0,
+    activity_col: str = "pEC50",
+) -> None:
+    """Generate and save the PXR ChemProp vs CheMeleon mirror distribution animation.
+
+    Builds pool-mode Exploitation frame data for both models and produces a
+    single mirror figure (ChemProp top / CheMeleon bottom) saved to
+    ``output_dir/pxr_mirror_distribution_Exploitation.html``.
+
+    Parameters
+    ----------
+    pxr_chemprop_data, pxr_chemeleon_data : dict
+        Assembled split-data dicts as returned by ``load_config_data``.
+    output_dir : Path
+        Directory to write the output HTML.
+    hit_threshold : float
+        Hit activity threshold (default 6.0 for PXR pEC50).
+    activity_col : str
+        Activity column name (default ``"pEC50"``).
+    """
+    print("\n=== PXR mirror distribution animation (Exploitation) ===")
+
+    strategy = "Exploitation"
+    cp_runs = pxr_chemprop_data["all_runs"].get(strategy, [])
+    cm_runs = pxr_chemeleon_data["all_runs"].get(strategy, [])
+
+    history_cp, y_true_cp, n_seeds_cp = _build_distribution_frames(
+        cp_runs, pxr_chemprop_data["df_pool"], activity_col, strategy, hit_threshold,
+    )
+    history_cm, y_true_cm, n_seeds_cm = _build_distribution_frames(
+        cm_runs, pxr_chemeleon_data["df_pool"], activity_col, strategy, hit_threshold,
+    )
+
+    if not history_cp or not history_cm:
+        print("  [skip] insufficient frame data for one or both models.")
+        return
+    if y_true_cp is None or y_true_cm is None:
+        print("  [skip] pool-mode y_true not available — check that df_pool was provided.")
+        return
+
+    n_seeds = max(n_seeds_cp, n_seeds_cm)
+    seed_label = f"{n_seeds} seeds"
+
+    print(f"  ChemProp frames: {len(history_cp)}, CheMeleon frames: {len(history_cm)}")
+    fig = alp.plot_mirror_distribution_animation(
+        history_a=history_cp,
+        history_b=history_cm,
+        label_a="ChemProp",
+        label_b="CheMeleon",
+        hit_threshold=hit_threshold,
+        activity_col=activity_col,
+        strategy=strategy,
+        seed_label=seed_label,
+        per_frame_y_true_a=y_true_cp,
+        per_frame_y_true_b=y_true_cm,
+        n_seeds=n_seeds,
+    )
+    out_path = output_dir / "pxr_mirror_distribution_Exploitation.html"
+    fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)
+    print(f"  saved {out_path}")
 
 
 def main() -> None:
@@ -386,6 +452,16 @@ def main() -> None:
         hit_threshold=pxr_hit_thr,
     )
     _save_fig(fig, "pxr_combined_hit_discovery", output_dir, svg_queue)
+
+    # -----------------------------------------------------------------------
+    # PXR mirror distribution animation (ChemProp vs CheMeleon, Exploitation)
+    # -----------------------------------------------------------------------
+    generate_mirror_distribution_animation(
+        pxr_data[0],  # ChemProp no-ChEMBL (PXR_CONFIGS index 0)
+        pxr_data[1],  # CheMeleon no-ChEMBL (PXR_CONFIGS index 1)
+        output_dir,
+        hit_threshold=pxr_hit_thr,
+    )
 
     # -----------------------------------------------------------------------
     # Batch SVG export
