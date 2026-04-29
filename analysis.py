@@ -1159,14 +1159,18 @@ def generate_predicted_distribution_animation(
     hit_threshold: float = 6.0,
     activity_col: str = "pEC50",
     model: str = "",
+    df_pool: pd.DataFrame | None = None,
 ) -> None:
     """Generate and save animated hit/non-hit predicted-distribution figures.
 
     For every strategy, predictions across all seeds are pooled at each
-    iteration by concatenating ``y_test_pred`` arrays.  The test DataFrame is
-    tiled to match so the hit/non-hit mask remains consistent.  This produces
-    smoother KDE curves than any single seed and removes the need for
-    per-seed output files.
+    iteration by concatenating prediction arrays.  For **Exploitation**, when
+    ``df_pool`` is provided, the unlabeled-pool acquisition scores (= committee
+    mean predictions on the pool compounds the model is actually choosing from)
+    are used instead of held-out test-set predictions.  The hit/non-hit mask is
+    then recomputed each frame from the shrinking unlabeled pool's true
+    activities.  All other strategies continue to use ``y_test_pred`` on the
+    fixed test set.
 
     Saves one HTML file per strategy:
     ``predicted_distribution_{strategy}.html``.
@@ -1193,8 +1197,15 @@ def generate_predicted_distribution_animation(
         Model name shown as the first element of each figure title, e.g.
         ``"CheMeleon"`` or ``"ChemProp"``.  When empty, omitted from title.
         Default is ``""``.
+    df_pool : pd.DataFrame, optional
+        Full labeled-pool DataFrame with an ``activity_col`` column.  When
+        provided, Exploitation animations use unlabeled-pool acquisition scores
+        (mean predictions) and per-frame true labels from the pool rather than
+        the held-out test set.  Default is ``None``.
     """
     results_dir = Path(results_dir)
+    y_pool = df_pool[activity_col].to_numpy() if df_pool is not None else None
+
     for strategy, runs in all_runs.items():
         valid_runs = [r for r in runs if r["history"]]
         if not valid_runs:
@@ -1202,19 +1213,64 @@ def generate_predicted_distribution_animation(
         n_seeds = len(valid_runs)
         # Align all seeds to the same number of iterations (take the minimum).
         n_iter = min(len(r["history"]) for r in valid_runs)
-        # Build merged history: concatenate y_test_pred across seeds per iteration.
+
+        use_pool_mode = (strategy == "Exploitation" and y_pool is not None)
+
+        # Build merged history: concatenate predictions across seeds per iteration.
         merged_history: list[dict] = []
-        for k in range(n_iter):
-            ref_state = valid_runs[0]["history"][k]
-            merged_state = {
-                "iteration": ref_state["iteration"],
-                "n_labeled": ref_state["n_labeled"],
-                "y_test_pred": np.concatenate(
-                    [r["history"][k]["y_test_pred"] for r in valid_runs]
-                ),
-            }
-            merged_history.append(merged_state)
-        # Tile df_test so its length matches the concatenated predictions.
+        per_frame_y_true: list[np.ndarray] | None = [] if use_pool_mode else None
+
+        if use_pool_mode:
+            # Pre-build the sequence of labeled masks for each seed so we can
+            # reconstruct the unlabeled pool at every iteration efficiently.
+            assert y_pool is not None
+            n_pool = len(y_pool)
+            seed_labeled_masks: list[np.ndarray] = []
+            for run in valid_runs:
+                h = run["history"]
+                lm = np.zeros(n_pool, dtype=bool)
+                lm[h[0]["selected_pool_indices"]] = True
+                seed_labeled_masks.append(lm)
+
+            for k in range(n_iter):
+                pool_preds_all: list[np.ndarray] = []
+                y_true_all: list[np.ndarray] = []
+                for si, run in enumerate(valid_runs):
+                    h = run["history"]
+                    # Update mask to include compounds labeled at this iteration
+                    # (iter 0 is already included from the initial mask above).
+                    if k > 0:
+                        seed_labeled_masks[si][h[k]["selected_pool_indices"]] = True
+                    unlabeled_idx = np.where(~seed_labeled_masks[si])[0]
+                    scores = np.asarray(h[k].get("acquisition_scores", []))
+                    if len(scores) == len(unlabeled_idx):
+                        pool_preds_all.append(scores)
+                        y_true_all.append(y_pool[unlabeled_idx])
+                    else:
+                        # Fallback: no acquisition scores for this seed/iter
+                        pool_preds_all.append(np.asarray(h[k]["y_test_pred"]))
+                        y_true_all.append(df_test[activity_col].to_numpy())
+
+                ref_state = valid_runs[0]["history"][k]
+                merged_history.append({
+                    "iteration": ref_state["iteration"],
+                    "n_labeled": ref_state["n_labeled"],
+                    "y_test_pred": np.concatenate(pool_preds_all),
+                })
+                assert per_frame_y_true is not None
+                per_frame_y_true.append(np.concatenate(y_true_all))
+        else:
+            for k in range(n_iter):
+                ref_state = valid_runs[0]["history"][k]
+                merged_history.append({
+                    "iteration": ref_state["iteration"],
+                    "n_labeled": ref_state["n_labeled"],
+                    "y_test_pred": np.concatenate(
+                        [r["history"][k]["y_test_pred"] for r in valid_runs]
+                    ),
+                })
+
+        # Tile df_test for non-pool-mode (pool-mode ignores df_test).
         df_test_tiled = pd.concat([df_test] * n_seeds, ignore_index=True)
         seed_label = f"{n_seeds} seeds"
         print(f"Generating predicted distribution animation: {strategy} ({seed_label}) ...")
@@ -1226,6 +1282,7 @@ def generate_predicted_distribution_animation(
             strategy=strategy,
             seed_label=seed_label,
             model=model,
+            per_frame_y_true=per_frame_y_true,
         )
         out_path = results_dir / f"predicted_distribution_{strategy}.html"
         fig.write_html(str(out_path), animation_opts=alp.DIST_ANIMATION_OPTS)
@@ -1261,10 +1318,11 @@ def main() -> None:
     parser.add_argument(
         "--hit-threshold",
         type=float,
-        default=7.0,
+        default=None,
         metavar="FLOAT",
-        help="pEC50 threshold above which a compound is counted as a hit in the "
-        "hit discovery curve. Default: 7.0",
+        help="pEC50 threshold above which a compound is counted as a hit. "
+        "Overrides the value set in the config YAML (data.hit_threshold). "
+        "Default: read from config (6.0 for PXR, 7.0 for ASAP).",
     )
     parser.add_argument(
         "--tmap-edge-threshold",
@@ -1278,6 +1336,9 @@ def main() -> None:
     args = parser.parse_args()
     cfg = load_config(args.config)
     results_dir = Path(cfg.results_path).expanduser()
+
+    # hit_threshold: CLI arg takes precedence; fall back to config-specified value
+    hit_threshold: float = args.hit_threshold if args.hit_threshold is not None else cfg.hit_threshold
 
     setups = load_setups(results_dir)
     available_split_types = list(setups.keys())
@@ -1298,7 +1359,7 @@ def main() -> None:
     generate_learning_curve_ktau(per_split_data, cfg, results_dir, svg_queue)
     generate_hit_discovery_curve(
         per_split_data, cfg, results_dir, svg_queue,
-        hit_threshold=args.hit_threshold,
+        hit_threshold=hit_threshold,
     )
     generate_calibration_area_per_iteration(
         per_split_data, cfg, results_dir, svg_queue, ylim=(0, 0.4)
@@ -1310,14 +1371,18 @@ def main() -> None:
         all_runs_primary, df_test_primary, results_dir, svg_queue
     )
 
-    # Distribution animation: uses y_test_pred already stored in every run pickle.
+    # Distribution animation: Exploitation uses unlabeled-pool acquisition scores
+    # (= committee mean predictions) to show the gap the model actually acts on.
+    # Other strategies fall back to y_test_pred on the held-out test set.
+    _df_pool_primary = per_split_data[_primary]["df_pool"]
     generate_predicted_distribution_animation(
         all_runs_primary,
         df_test_primary,
         results_dir,
-        hit_threshold=args.hit_threshold,
+        hit_threshold=hit_threshold,
         activity_col="pEC50",
         model="CheMeleon" if cfg.use_chemeleon else "ChemProp",
+        df_pool=_df_pool_primary,
     )
 
     for split_type, split_data in per_split_data.items():
@@ -1331,7 +1396,7 @@ def main() -> None:
             all_runs, gtm_coords_pool, results_dir,
             split_suffix=suffix,
             pool_activity=df_pool["pEC50"].values,
-            hit_threshold=args.hit_threshold,
+            hit_threshold=hit_threshold,
         )
         tmap_layout = compute_tmap_layout(df_pool)
         generate_tmap_figures(
@@ -1339,7 +1404,7 @@ def main() -> None:
             split_suffix=suffix,
             edge_similarity_threshold=args.tmap_edge_threshold,
             pool_activity=df_pool["pEC50"].values,
-            hit_threshold=args.hit_threshold,
+            hit_threshold=hit_threshold,
         )
         tmap_partition_layout = compute_tmap_partition_layout(df_pool, df_test)
         generate_tmap_partition_figures(

@@ -6,6 +6,7 @@ data:
   dataset_smiles_col: SMILES
   dataset_activity_col: pEC50
   results_path: results/oracle_pxr_real_ramping
+  hit_threshold: 6.0
   dataset_split_seed: 43
   gtm_seed: 1234
   setup_results_path: results/pxr_chemprop

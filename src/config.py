@@ -108,6 +108,10 @@ class ALConfig:
         Tanimoto distance threshold for Butina clustering. Must be in (0, 1).
         Ignored when ``cluster_method`` is not ``"butina"``. Default is
         ``0.65``.
+    hit_threshold : float
+        pEC50 (or pIC50) value at or above which a compound is classified as a
+        hit for hit-discovery figures and the distribution animation. Typical
+        values: ``6.0`` for PXR, ``7.0`` for ASAP Mpro. Default is ``6.0``.
 
     """
 
@@ -135,6 +139,7 @@ class ALConfig:
     cluster_k_clusters: int
     cluster_butina_cutoff: float
     predefined_split_col: str
+    hit_threshold: float
 
 
 def load_config(path: str | Path = "config.yaml") -> ALConfig:
@@ -353,6 +358,14 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         )
         predefined_split_col = "split"
 
+    # hit threshold: optional, defaults to 6.0 (PXR convention); ASAP configs should set 7.0
+    hit_threshold = data.get("hit_threshold", 6.0)
+    if not isinstance(hit_threshold, (int, float)) or hit_threshold <= 0:
+        errors.append(
+            f"[data] 'hit_threshold' must be a positive number, got {hit_threshold!r}"
+        )
+        hit_threshold = 6.0
+
     # cross-field check: n_start=0 requires seed_data_path
     if n_start == 0 and seed_data_path is None:
         errors.append(
@@ -398,4 +411,5 @@ def load_config(path: str | Path = "config.yaml") -> ALConfig:
         cluster_k_clusters=cluster_k_clusters,
         cluster_butina_cutoff=cluster_butina_cutoff,
         predefined_split_col=predefined_split_col,
+        hit_threshold=hit_threshold,
     )

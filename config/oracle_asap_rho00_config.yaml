@@ -7,6 +7,7 @@ data:
   dataset_smiles_col: CXSMILES
   dataset_activity_col: "pIC50 (SARS-CoV-2 Mpro)"
   results_path: results/oracle_asap_rho00
+  hit_threshold: 7.0
   dataset_split_seed: 43
   gtm_seed: 1234
   setup_results_path: results/asap_chemprop

@@ -12,6 +12,7 @@ data:
   results_path: results/pxr_chemprop_chembl
 
   # Random seed for the pool/test splitter. Ignored for the "predefined" split type.
+  hit_threshold: 6.0
   dataset_split_seed: 43
 
   # Random seed for the GTM visualization embedding. Does not affect model training.
