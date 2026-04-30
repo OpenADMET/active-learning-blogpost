@@ -2306,8 +2306,14 @@ def plot_predicted_distribution_animation(
             sliders=[
                 dict(
                     active=0,
-                    currentvalue=dict(visible=False),
-                    pad=dict(b=10, t=80),
+                    currentvalue=dict(
+                        prefix="Iteration ",
+                        visible=True,
+                        xanchor="center",
+                        font=dict(color="black"),
+                    ),
+                    font=dict(color="rgba(0,0,0,0)"),
+                    pad=dict(t=50),
                     steps=[
                         dict(
                             method="animate",
@@ -2680,8 +2686,14 @@ def plot_mirror_distribution_animation(
             margin=dict(r=90, b=140),
             sliders=[dict(
                 active=0,
-                currentvalue=dict(visible=False),
-                pad=dict(b=10, t=80),
+                currentvalue=dict(
+                    prefix="Iteration ",
+                    visible=True,
+                    xanchor="center",
+                    font=dict(color="black"),
+                ),
+                font=dict(color="rgba(0,0,0,0)"),
+                pad=dict(t=50),
                 steps=[
                     dict(
                         method="animate",
