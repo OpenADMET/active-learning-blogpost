@@ -1256,6 +1256,82 @@ def _build_distribution_frames(
     return merged_history, per_frame_y_true, n_seeds
 
 
+def _compute_gap_trajectory(
+    runs: list,
+    df_pool: "pd.DataFrame",
+    activity_col: str,
+    hit_threshold: float,
+) -> "tuple[np.ndarray, np.ndarray, np.ndarray]":
+    """Compute the hit/non-hit predicted-activity gap per iteration for Exploitation.
+
+    For each seed, reconstructs the unlabeled mask at each AL iteration and reads
+    ``acquisition_scores`` (Exploitation pool predictions) to compute
+    ``mean(scores[hits]) − mean(scores[non-hits])``.  Returns the per-iteration
+    mean and standard deviation across seeds.
+
+    Parameters
+    ----------
+    runs : list of dict
+        Per-seed run records, each with ``"history"`` and ``"seed"`` keys.
+        Runs with empty histories are silently dropped.
+    df_pool : pd.DataFrame
+        Full pool DataFrame with an ``activity_col`` column.
+    activity_col : str
+        Column name for ground-truth activity values in ``df_pool``.
+    hit_threshold : float
+        Activity value at or above which a compound is classified as a hit.
+
+    Returns
+    -------
+    n_labeled : np.ndarray, shape (n_iter,)
+        Number of labeled pool compounds at each iteration.
+    gap_mean : np.ndarray, shape (n_iter,)
+        Mean gap across seeds; ``nan`` where no valid seeds contributed.
+    gap_std : np.ndarray, shape (n_iter,)
+        Standard deviation of gap across seeds; ``nan`` similarly.
+
+    """
+    valid_runs = [r for r in runs if r["history"]]
+    if not valid_runs:
+        return np.array([]), np.array([]), np.array([])
+
+    y_pool = df_pool[activity_col].to_numpy()
+    n_pool = len(y_pool)
+    n_iter = min(len(r["history"]) for r in valid_runs)
+
+    per_seed_gaps: list[list[float]] = []
+    n_labeled_list: list[int] = [valid_runs[0]["history"][k]["n_labeled"] for k in range(n_iter)]
+
+    for run in valid_runs:
+        h = run["history"]
+        labeled_mask = np.zeros(n_pool, dtype=bool)
+        labeled_mask[h[0]["selected_pool_indices"]] = True
+        seed_gaps: list[float] = []
+        for k in range(n_iter):
+            if k > 0:
+                labeled_mask[h[k]["selected_pool_indices"]] = True
+            unlabeled_idx = np.where(~labeled_mask)[0]
+            raw = h[k].get("acquisition_scores")
+            if raw is None or len(raw) != len(unlabeled_idx):
+                seed_gaps.append(float("nan"))
+                continue
+            scores = np.asarray(raw)
+            y_true_unlab = y_pool[unlabeled_idx]
+            hit_mask = y_true_unlab >= hit_threshold
+            if hit_mask.sum() == 0 or (~hit_mask).sum() == 0:
+                seed_gaps.append(float("nan"))
+                continue
+            seed_gaps.append(float(np.mean(scores[hit_mask]) - np.mean(scores[~hit_mask])))
+        per_seed_gaps.append(seed_gaps)
+
+    arr = np.array(per_seed_gaps, dtype=float)  # (n_seeds, n_iter)
+    return (
+        np.array(n_labeled_list),
+        np.nanmean(arr, axis=0),
+        np.nanstd(arr, axis=0),
+    )
+
+
 def generate_predicted_distribution_animation(
     all_runs: dict[str, list],
     df_test: pd.DataFrame,

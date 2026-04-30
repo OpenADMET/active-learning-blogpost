@@ -29,13 +29,14 @@ Grid layouts
 * **ASAP** — 1 × 2: ``ChemProp | CheMeleon``
 * **PXR**  — 2 × 2: rows = no-ChEMBL / +ChEMBL, cols = ChemProp / CheMeleon
 
-Metrics (4 grid figures per target, plus 1 mirror animation per target)
-------------------------------------------------------------------------
+Metrics (4 grid figures per target, plus 1 mirror animation per target, plus 1 cross-target gap figure)
+-----------------------------------------------------------------------------------------------------
 * MAE learning curve
 * Kendall τ learning curve
 * Hit discovery curve
 * σ–|error| Spearman ρ
 * ChemProp vs CheMeleon mirror distribution (Exploitation, animated)
+* Hit/non-hit gap vs. labeled pool size (Exploitation, all configs, single panel)
 
 Usage
 -----
@@ -60,7 +61,7 @@ import plotly.graph_objects as go  # noqa: E402
 from kaleido import Kaleido  # noqa: E402
 
 import src.plots as alp  # noqa: E402
-from analysis import build_split_data, load_job_results, load_setups, _build_distribution_frames  # noqa: E402
+from analysis import build_split_data, load_job_results, load_setups, _build_distribution_frames, _compute_gap_trajectory  # noqa: E402
 from src.config import load_config  # noqa: E402
 from src.helpers import STRATEGY_COLORS  # noqa: E402
 
@@ -197,6 +198,101 @@ def _hit_panel_data(data: dict, hit_threshold: float) -> dict:
         "max_hits": int((data["df_pool"]["pEC50"] >= hit_threshold).sum()),
         "pool_size": len(data["df_pool"]),
     }
+
+
+# Color palette: encodes (model, ChEMBL) combinations consistently across plots.
+_GAP_COLORS: dict[str, str] = {
+    "ChemProp": "#DC143C",          # crimson
+    "ChemProp + ChEMBL": "#8B0000", # dark red
+    "CheMeleon": "#228B22",         # forest green
+    "CheMeleon + ChEMBL": "#006400",# dark green
+}
+# Dash style: encodes target dataset.
+_GAP_DASH: dict[str, str] = {
+    "PXR": "solid",
+    "ASAP": "dash",
+}
+
+
+def generate_hit_nonhit_gap_curve(
+    asap_data: "list[dict]",
+    pxr_data: "list[dict]",
+    output_dir: Path,
+    asap_hit_threshold: float = 7.0,
+    pxr_hit_threshold: float = 6.0,
+    svg_queue: "list | None" = None,
+) -> None:
+    """Generate and save the hit/non-hit gap vs. labeled pool size figure.
+
+    Plots the Exploitation hit/non-hit predicted-activity gap for all model
+    initializations (ChemProp, CheMeleon, and PXR-only ChEMBL variants) on a
+    single panel.  Color encodes model initialization; line dash encodes
+    target dataset (solid = PXR, dashed = ASAP).
+
+    Parameters
+    ----------
+    asap_data : list of dict
+        Loaded data dicts for ASAP configs (order matches ``ASAP_CONFIGS``).
+    pxr_data : list of dict
+        Loaded data dicts for PXR configs (order matches ``PXR_CONFIGS``).
+    output_dir : Path
+        Directory to write the output HTML (and queue SVG if provided).
+    asap_hit_threshold : float
+        Hit activity threshold for ASAP Mpro.
+    pxr_hit_threshold : float
+        Hit activity threshold for PXR.
+    svg_queue : list or None
+        If provided, ``(fig, svg_path)`` is appended for later batch export.
+
+    """
+    print("\n=== Hit/non-hit gap curve (Exploitation) ===")
+    traces = []
+
+    asap_configs_meta = [(label, "ASAP") for label, *_ in ASAP_CONFIGS]
+    pxr_configs_meta  = [(label, "PXR")  for label, *_ in PXR_CONFIGS]
+
+    for (label, target), data, hit_thr in [
+        *zip(asap_configs_meta, asap_data, [asap_hit_threshold] * len(asap_data)),
+        *zip(pxr_configs_meta,  pxr_data,  [pxr_hit_threshold]  * len(pxr_data)),
+    ]:
+        runs = data["all_runs"].get("Exploitation", [])
+        if not runs:
+            print(f"  [skip] {label} ({target}): no Exploitation runs")
+            continue
+
+        n_labeled, gap_mean, gap_std = _compute_gap_trajectory(
+            runs,
+            data["df_pool"],
+            activity_col="pEC50",
+            hit_threshold=hit_thr,
+        )
+        if len(n_labeled) == 0:
+            print(f"  [skip] {label} ({target}): no gap data")
+            continue
+
+        trace_label = f"{label} ({target})"
+        traces.append({
+            "label": trace_label,
+            "n_labeled": n_labeled,
+            "gap_mean": gap_mean,
+            "gap_std": gap_std,
+            "color": _GAP_COLORS.get(label, "#888888"),
+            "dash": _GAP_DASH.get(target, "solid"),
+        })
+        print(f"  {trace_label}: {len(n_labeled)} iterations")
+
+    if not traces:
+        print("  [skip] no valid traces — figure not generated.")
+        return
+
+    fig = alp.plot_hit_nonhit_gap_curve(traces)
+    stem = "hit_nonhit_gap_Exploitation"
+    html_path = str(output_dir / f"{stem}.html")
+    svg_path = str(output_dir / f"{stem}.svg")
+    alp.write_html_both(fig=fig, path=html_path)
+    print(f"  saved {html_path}")
+    if svg_queue is not None:
+        svg_queue.append((fig, svg_path))
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +577,18 @@ def main() -> None:
         file_slug="pxr",
         target_label="PXR",
         hit_threshold=pxr_hit_thr,
+    )
+
+    # -----------------------------------------------------------------------
+    # Hit/non-hit gap curve (Exploitation, all configs, single panel)
+    # -----------------------------------------------------------------------
+    generate_hit_nonhit_gap_curve(
+        asap_data=asap_data,
+        pxr_data=pxr_data,
+        output_dir=output_dir,
+        asap_hit_threshold=asap_hit_thr,
+        pxr_hit_threshold=pxr_hit_thr,
+        svg_queue=svg_queue,
     )
 
     # -----------------------------------------------------------------------

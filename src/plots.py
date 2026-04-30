@@ -1440,6 +1440,126 @@ def plot_sigma_error_correlation(
     return fig
 
 
+def plot_hit_nonhit_gap_curve(
+    traces: "list[dict]",
+    hit_threshold: float = 6.0,
+    ylabel: str = "Hit / Non-Hit Gap (activity units)",
+    width: int = 750,
+    height: int = 475,
+) -> go.Figure:
+    """Hit/non-hit predicted-activity gap vs. labeled pool size.
+
+    Plots one mean line with ±1 SD shaded band per trace.  Each trace
+    represents a (target, model-initialization) combination under the
+    **Exploitation** strategy.
+
+    Parameters
+    ----------
+    traces : list of dict
+        Each dict must contain:
+
+        * ``"label"`` (str) — legend entry.
+        * ``"n_labeled"`` (array-like) — x-axis values.
+        * ``"gap_mean"`` (array-like) — mean gap at each iteration.
+        * ``"gap_std"`` (array-like) — standard deviation of gap across seeds.
+        * ``"color"`` (str) — CSS hex or RGB color string for the line.
+        * ``"dash"`` (str) — Plotly dash style, e.g. ``"solid"`` or ``"dash"``.
+    hit_threshold : float
+        Hit threshold shown in the y-axis label.
+    ylabel : str
+        Y-axis label.
+    width, height : int, optional
+        Figure dimensions in pixels.
+
+    Returns
+    -------
+    go.Figure
+        Interactive Plotly figure with one mean line and one ±1 SD shaded band
+        per trace, plus a y = 0 reference line.
+
+    """
+    fig = go.Figure()
+
+    fig.add_hline(y=0, line=dict(color="rgba(0,0,0,0.25)", width=1, dash="dash"))
+
+    for tr in traces:
+        label: str = tr["label"]
+        x = np.asarray(tr["n_labeled"])
+        mean = np.asarray(tr["gap_mean"])
+        std = np.asarray(tr["gap_std"])
+        color: str = tr["color"]
+        dash: str = tr.get("dash", "solid")
+
+        upper = mean + std
+        lower = mean - std
+        fill_color = _hex_to_rgba(color, 0.15) if color.startswith("#") else "rgba(128,128,128,0.15)"
+
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=upper,
+                mode="lines",
+                line=dict(width=0),
+                legendgroup=label,
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=lower,
+                mode="lines",
+                line=dict(width=0),
+                fill="tonexty",
+                fillcolor=fill_color,
+                legendgroup=label,
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=mean,
+                mode="lines",
+                name=label,
+                legendgroup=label,
+                showlegend=True,
+                line=dict(width=2, color=color, dash=dash),
+            )
+        )
+
+    fig.update_layout(
+        xaxis_title="Number of Labeled Molecules",
+        yaxis_title=ylabel,
+        legend_title="Config",
+        xaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.1)",
+            gridwidth=1,
+            showline=True,
+            linecolor="black",
+            linewidth=1,
+            mirror=True,
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(0,0,0,0.1)",
+            gridwidth=1,
+            showline=True,
+            linecolor="black",
+            linewidth=1,
+            mirror=True,
+        ),
+        plot_bgcolor="white",
+        margin=dict(t=40),
+        width=width,
+        height=height,
+    )
+    return fig
+
+
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     """Convert a CSS hex color string to an ``rgba()`` string with the given alpha.
 
