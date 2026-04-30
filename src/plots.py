@@ -734,7 +734,6 @@ def plot_gtm_selection_animation(
                                 dict(
                                     frame=dict(duration=1200, redraw=True),
                                     fromcurrent=True,
-                                    loop=True,
                                     transition=dict(duration=400),
                                 ),
                             ],
