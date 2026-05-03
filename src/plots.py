@@ -17,8 +17,7 @@ from faerun import Faerun
 from plotly.subplots import make_subplots
 
 # Animation timing for plot_predicted_distribution_animation.
-# Used by the Play button args and by write_html(animation_opts=...) so both paths
-# share the same frame duration and transition speed.
+# Used by write_html(animation_opts=...) so scrub and playback share the same speed.
 # redraw=True is required so that trace names (legend "n=X") and layout title
 # ("X labeled") are re-applied on every frame during playback, not just on scrub.
 _DIST_FRAME_MS: int = 1000
@@ -28,6 +27,143 @@ DIST_ANIMATION_OPTS: dict = dict(
     transition=dict(duration=_DIST_TRANSITION_MS),
 )
 
+# GTM animation timing (matches the inline values used in analysis.py).
+_GTM_FRAME_MS: int = 1200
+_GTM_TRANSITION_MS: int = 400
+
+# JS injected into animated HTML exports via post_script to provide a single
+# play/pause toggle button above the chart.  Placeholders are substituted by
+# make_play_pause_script().  No auto-play: the animation only starts on click.
+_PLAY_PAUSE_SCRIPT_TEMPLATE = r"""
+(function() {
+  var gd = document.querySelector('.js-plotly-plot');
+  if (!gd) return;
+  var playing = false;
+  var playToken = 0;
+  var toolbar = document.createElement('div');
+  toolbar.style.cssText = 'margin:4px 0;padding-left:4px;';
+  var btn = document.createElement('button');
+  btn.innerHTML = '\u25B6 Play';
+  btn.style.cssText = 'padding:5px 14px;font-size:13px;cursor:pointer;'
+    + 'background:#555;color:#fff;border:1px solid #888;border-radius:4px;';
+  toolbar.appendChild(btn);
+  gd.insertAdjacentElement('beforebegin', toolbar);
+
+  function setPlaying(isPlaying) {
+    playing = isPlaying;
+    btn.innerHTML = isPlaying ? '\u23F8 Pause' : '\u25B6 Play';
+  }
+
+  function getFrameNames() {
+    var frames = (gd._transitionData && gd._transitionData._frames) || [];
+    return frames.map(function(frame) { return frame.name; }).filter(Boolean);
+  }
+
+  function getStartIndex(frameNames) {
+    var sliders = gd._fullLayout && gd._fullLayout.sliders;
+    var active = sliders && sliders.length ? sliders[0].active : 0;
+    if (typeof active !== 'number' || !isFinite(active) || active < 0) {
+      return 0;
+    }
+    if (active >= frameNames.length - 1) {
+      return 0;
+    }
+    return active;
+  }
+
+  function stopAnimation() {
+    playToken += 1;
+    setPlaying(false);
+    return Plotly.animate(gd, [null], {
+      mode: 'immediate',
+      frame: {duration: 0, redraw: false},
+      transition: {duration: 0, ordering: 'layout first'}
+    });
+  }
+
+  function playAnimation() {
+    var frameNames = getFrameNames();
+    if (!frameNames.length) return Promise.resolve();
+
+    var startIndex = getStartIndex(frameNames);
+    var token = playToken + 1;
+    playToken = token;
+    setPlaying(true);
+
+    return Plotly.animate(gd, [frameNames[startIndex]], {
+      mode: 'immediate',
+      frame: {duration: 0, redraw: false},
+      transition: {duration: 0, ordering: 'layout first'}
+    }).then(function() {
+      if (token !== playToken) return;
+
+      var remainingFrames = frameNames.slice(startIndex + 1);
+      if (!remainingFrames.length) return;
+
+      return Plotly.animate(gd, remainingFrames, {
+        mode: 'afterall',
+        frame: {duration: __FRAME_MS__, redraw: false},
+        transition: {
+          duration: __TRANSITION_MS__,
+          easing: '__EASING__',
+          ordering: 'layout first'
+        }
+      });
+    }).catch(function() {
+      return;
+    }).then(function() {
+      if (token === playToken) {
+        setPlaying(false);
+      }
+    });
+  }
+
+  btn.addEventListener('click', function() {
+    if (!playing) {
+      playAnimation();
+    } else {
+      stopAnimation();
+    }
+  });
+})();
+"""
+
+
+def make_play_pause_script(frame_ms: int, transition_ms: int, easing: str) -> str:
+    """Return a JS play/pause toggle script with the given animation parameters.
+
+    The returned string is suitable for passing as ``post_script`` to
+    ``write_html_both`` (or directly to ``fig.write_html``).  It inserts a
+    single ▶/⏸ toggle button above the chart via DOM injection; no Plotly
+    ``updatemenus`` are needed.  The animation does **not** auto-play —
+    playback starts only when the user clicks the button.
+
+    Parameters
+    ----------
+    frame_ms : int
+        Duration of each frame in milliseconds during playback.
+    transition_ms : int
+        Transition duration between frames in milliseconds.
+    easing : str
+        CSS/Plotly easing name (e.g. ``"linear"``, ``"circle"``).
+
+    Returns
+    -------
+    str
+        JavaScript snippet ready for ``post_script``.
+    """
+    return (
+        _PLAY_PAUSE_SCRIPT_TEMPLATE
+        .replace("__FRAME_MS__", str(frame_ms))
+        .replace("__TRANSITION_MS__", str(transition_ms))
+        .replace("__EASING__", easing)
+    )
+
+
+# Pre-built convenience scripts for the two animation types in this repo.
+DIST_PLAY_PAUSE_SCRIPT: str = make_play_pause_script(_DIST_FRAME_MS, _DIST_TRANSITION_MS, "linear")
+GTM_PLAY_PAUSE_SCRIPT: str = make_play_pause_script(_GTM_FRAME_MS, _GTM_TRANSITION_MS, "circle")
+
 
 def write_html_both(
     fig: go.Figure,
@@ -35,6 +171,7 @@ def write_html_both(
     *,
     animation_opts: dict | None = None,
     auto_play: bool = False,
+    post_script: str | None = None,
 ) -> None:
     """Write a figure to both an embedded HTML file and a CDN-linked HTML file.
 
@@ -57,11 +194,17 @@ def write_html_both(
         Passed directly to ``fig.write_html`` for both versions.
     auto_play : bool
         Whether to auto-play animations on page load.  Default is ``False``.
+    post_script : str, optional
+        JavaScript snippet injected after Plotly initialises the figure.
+        Pass ``DIST_PLAY_PAUSE_SCRIPT`` or ``GTM_PLAY_PAUSE_SCRIPT`` to inject
+        the DOM play/pause toggle button for animated figures.
     """
     path = Path(path)
     kwargs: dict = dict(auto_play=auto_play)
     if animation_opts is not None:
         kwargs["animation_opts"] = animation_opts
+    if post_script is not None:
+        kwargs["post_script"] = post_script
 
     fig.write_html(str(path), include_plotlyjs=True, **kwargs)
 
@@ -717,41 +860,7 @@ def plot_gtm_selection_animation(
             yaxis=dict(title="GTM dimension 2", showgrid=False, zeroline=False),
             legend=dict(itemsizing="constant"),
             hovermode=False,
-            updatemenus=[
-                dict(
-                    type="buttons",
-                    showactive=False,
-                    y=0.85,
-                    x=1.2,
-                    xanchor="right",
-                    yanchor="top",
-                    buttons=[
-                        dict(
-                            label="▶ Play",
-                            method="animate",
-                            args=[
-                                None,
-                                dict(
-                                    frame=dict(duration=1200, redraw=True),
-                                    fromcurrent=True,
-                                    transition=dict(duration=400),
-                                ),
-                            ],
-                        ),
-                        dict(
-                            label="⏸ Pause",
-                            method="animate",
-                            args=[
-                                [None],
-                                dict(
-                                    frame=dict(duration=0, redraw=False),
-                                    mode="immediate",
-                                ),
-                            ],
-                        ),
-                    ],
-                )
-            ],
+            updatemenus=[],
             sliders=[
                 dict(
                     active=0,
@@ -2331,45 +2440,7 @@ def plot_predicted_distribution_animation(
                     ],
                 )
             ],
-            updatemenus=[
-                dict(
-                    type="buttons",
-                    showactive=False,
-                    y=1.0,
-                    x=1.01,
-                    xanchor="left",
-                    yanchor="top",
-                    buttons=[
-                        dict(
-                            label="▶ Play",
-                            method="animate",
-                            args=[
-                                None,
-                                dict(
-                                    frame=dict(duration=_DIST_FRAME_MS, redraw=True),
-                                    fromcurrent=True,
-                                    transition=dict(
-                                        duration=_DIST_TRANSITION_MS,
-                                        easing="linear",
-                                    ),
-                                ),
-                            ],
-                        ),
-                        dict(
-                            label="⏸ Pause",
-                            method="animate",
-                            args=[
-                                [None],
-                                dict(
-                                    frame=dict(duration=0, redraw=False),
-                                    mode="immediate",
-                                    transition=dict(duration=0),
-                                ),
-                            ],
-                        ),
-                    ],
-                )
-            ],
+            updatemenus=[],
         ),
     )
     return fig
@@ -2710,38 +2781,7 @@ def plot_mirror_distribution_animation(
                     for s in history_a[:n_frames]
                 ],
             )],
-            updatemenus=[dict(
-                type="buttons",
-                showactive=False,
-                y=1.0, x=1.01,
-                xanchor="left", yanchor="top",
-                buttons=[
-                    dict(
-                        label="▶ Play",
-                        method="animate",
-                        args=[
-                            None,
-                            dict(
-                                frame=dict(duration=_DIST_FRAME_MS, redraw=True),
-                                fromcurrent=True,
-                                transition=dict(duration=_DIST_TRANSITION_MS, easing="linear"),
-                            ),
-                        ],
-                    ),
-                    dict(
-                        label="⏸ Pause",
-                        method="animate",
-                        args=[
-                            [None],
-                            dict(
-                                frame=dict(duration=0, redraw=False),
-                                mode="immediate",
-                                transition=dict(duration=0),
-                            ),
-                        ],
-                    ),
-                ],
-            )],
+            updatemenus=[],
         ),
     )
     return fig

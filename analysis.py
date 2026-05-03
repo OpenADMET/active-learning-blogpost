@@ -767,6 +767,7 @@ def generate_gtm_figures(
             frame=dict(duration=1200, redraw=True),
             transition=dict(duration=400),
         ),
+        post_script=alp.GTM_PLAY_PAUSE_SCRIPT,
     )
 
     # Static matplotlib snapshot: compounds coloured by first-acquired iteration
@@ -1408,7 +1409,7 @@ def generate_predicted_distribution_animation(
             n_seeds=n_seeds,
         )
         out_path = results_dir / f"predicted_distribution_{strategy}.html"
-        alp.write_html_both(fig=fig, path=out_path, animation_opts=alp.DIST_ANIMATION_OPTS)
+        alp.write_html_both(fig=fig, path=out_path, animation_opts=alp.DIST_ANIMATION_OPTS, post_script=alp.DIST_PLAY_PAUSE_SCRIPT)
         print(f"  saved {out_path}")
 
 

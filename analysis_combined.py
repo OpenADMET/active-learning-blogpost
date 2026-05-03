@@ -368,7 +368,7 @@ def generate_mirror_distribution_animation(
         n_seeds=n_seeds,
     )
     out_path = output_dir / f"{file_slug}_mirror_distribution_Exploitation.html"
-    alp.write_html_both(fig=fig, path=out_path, animation_opts=alp.DIST_ANIMATION_OPTS)
+    alp.write_html_both(fig=fig, path=out_path, animation_opts=alp.DIST_ANIMATION_OPTS, post_script=alp.DIST_PLAY_PAUSE_SCRIPT)
     print(f"  saved {out_path}")
 
 
