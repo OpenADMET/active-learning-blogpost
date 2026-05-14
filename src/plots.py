@@ -208,12 +208,15 @@ def write_html_both(
     path = Path(path)
     div_id = str(uuid.uuid4())
 
-    # CSS injected via post_script: center the figure div and clamp it to the
-    # container width so it never overflows a narrow CMS column (e.g. Ghost).
+    # CSS injected via post_script: center the figure div, cap it at its
+    # designed pixel width, and prevent overflow into narrow CMS columns (e.g.
+    # Ghost).  responsive:True (in config) still lets it shrink below that cap.
+    fig_width = fig.layout.width or 700
     centering_css = (
         "(function(){"
         "var s=document.createElement('style');"
-        "s.textContent='#" + div_id + "{max-width:100%!important;"
+        f"s.textContent='#{div_id}{{max-width:{fig_width}px!important;"
+        "width:100%!important;"
         "margin-left:auto!important;margin-right:auto!important;"
         "display:block!important;}';"
         "document.head.appendChild(s);"
