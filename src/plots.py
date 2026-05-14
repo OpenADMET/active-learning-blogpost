@@ -207,11 +207,30 @@ def write_html_both(
     """
     path = Path(path)
     div_id = str(uuid.uuid4())
-    kwargs: dict = dict(auto_play=auto_play, div_id=div_id)
+
+    # CSS injected via post_script: center the figure div and clamp it to the
+    # container width so it never overflows a narrow CMS column (e.g. Ghost).
+    centering_css = (
+        "(function(){"
+        "var s=document.createElement('style');"
+        "s.textContent='#" + div_id + "{max-width:100%!important;"
+        "margin-left:auto!important;margin-right:auto!important;"
+        "display:block!important;}';"
+        "document.head.appendChild(s);"
+        "})();"
+    )
+
+    user_script = post_script.replace("__DIV_ID__", div_id) if post_script is not None else None
+    combined_script = "\n".join(filter(None, [centering_css, user_script]))
+
+    kwargs: dict = dict(
+        auto_play=auto_play,
+        div_id=div_id,
+        post_script=combined_script,
+        config={"responsive": True},
+    )
     if animation_opts is not None:
         kwargs["animation_opts"] = animation_opts
-    if post_script is not None:
-        kwargs["post_script"] = post_script.replace("__DIV_ID__", div_id)
 
     fig.write_html(str(path), include_plotlyjs=True, **kwargs)
 
