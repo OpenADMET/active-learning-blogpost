@@ -5,6 +5,7 @@ Figures share a consistent visual style: white background, black axes, and
 per-strategy colors from ``src.helpers.STRATEGY_COLORS``.
 """
 
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,10 @@ from plotly.subplots import make_subplots
 # Used by write_html(animation_opts=...) so scrub and playback share the same speed.
 # redraw=True is required so that trace names (legend "n=X") and layout title
 # ("X labeled") are re-applied on every frame during playback, not just on scrub.
+# transition_ms=0: KDE curves don't interpolate meaningfully — any non-zero
+# transition produces nonsensical intermediate density shapes.
 _DIST_FRAME_MS: int = 1000
-_DIST_TRANSITION_MS: int = 800
+_DIST_TRANSITION_MS: int = 0
 DIST_ANIMATION_OPTS: dict = dict(
     frame=dict(duration=_DIST_FRAME_MS, redraw=True),
     transition=dict(duration=_DIST_TRANSITION_MS),
@@ -36,7 +39,7 @@ _GTM_TRANSITION_MS: int = 400
 # make_play_pause_script().  No auto-play: the animation only starts on click.
 _PLAY_PAUSE_SCRIPT_TEMPLATE = r"""
 (function() {
-  var gd = document.querySelector('.js-plotly-plot');
+  var gd = document.getElementById('__DIV_ID__');
   if (!gd) return;
   var playing = false;
   var playToken = 0;
@@ -83,39 +86,36 @@ _PLAY_PAUSE_SCRIPT_TEMPLATE = r"""
 
   function playAnimation() {
     var frameNames = getFrameNames();
-    if (!frameNames.length) return Promise.resolve();
+    if (!frameNames.length) return;
 
     var startIndex = getStartIndex(frameNames);
     var token = playToken + 1;
     playToken = token;
     setPlaying(true);
 
-    return Plotly.animate(gd, [frameNames[startIndex]], {
-      mode: 'immediate',
-      frame: {duration: 0, redraw: false},
-      transition: {duration: 0, ordering: 'layout first'}
-    }).then(function() {
+    function playFrame(index) {
       if (token !== playToken) return;
+      if (index >= frameNames.length) {
+        setPlaying(false);
+        return;
+      }
 
-      var remainingFrames = frameNames.slice(startIndex + 1);
-      if (!remainingFrames.length) return;
-
-      return Plotly.animate(gd, remainingFrames, {
-        mode: 'afterall',
-        frame: {duration: __FRAME_MS__, redraw: false},
+      Plotly.animate(gd, [frameNames[index]], {
+        mode: 'immediate',
+        frame: {duration: 0, redraw: __REDRAW__},
         transition: {
           duration: __TRANSITION_MS__,
           easing: '__EASING__',
           ordering: 'layout first'
         }
-      });
-    }).catch(function() {
-      return;
-    }).then(function() {
-      if (token === playToken) {
-        setPlaying(false);
-      }
-    });
+      }).then(function() {
+        if (token !== playToken) return;
+        Plotly.relayout(gd, {'sliders[0].active': index});
+        setTimeout(function() { playFrame(index + 1); }, __FRAME_MS__);
+      }).catch(function() {});
+    }
+
+    playFrame(startIndex);
   }
 
   btn.addEventListener('click', function() {
@@ -129,7 +129,7 @@ _PLAY_PAUSE_SCRIPT_TEMPLATE = r"""
 """
 
 
-def make_play_pause_script(frame_ms: int, transition_ms: int, easing: str) -> str:
+def make_play_pause_script(frame_ms: int, transition_ms: int, easing: str, redraw: bool = False) -> str:
     """Return a JS play/pause toggle script with the given animation parameters.
 
     The returned string is suitable for passing as ``post_script`` to
@@ -146,6 +146,11 @@ def make_play_pause_script(frame_ms: int, transition_ms: int, easing: str) -> st
         Transition duration between frames in milliseconds.
     easing : str
         CSS/Plotly easing name (e.g. ``"linear"``, ``"circle"``).
+    redraw : bool
+        Whether to force a full Plotly redraw on each frame.  Must be
+        ``True`` when frames include layout changes (e.g. title ``text``) or
+        trace ``name`` updates (legend labels), otherwise those properties
+        only update on manual scrub.  Default is ``False``.
 
     Returns
     -------
@@ -157,12 +162,13 @@ def make_play_pause_script(frame_ms: int, transition_ms: int, easing: str) -> st
         .replace("__FRAME_MS__", str(frame_ms))
         .replace("__TRANSITION_MS__", str(transition_ms))
         .replace("__EASING__", easing)
+        .replace("__REDRAW__", "true" if redraw else "false")
     )
 
 
 # Pre-built convenience scripts for the two animation types in this repo.
-DIST_PLAY_PAUSE_SCRIPT: str = make_play_pause_script(_DIST_FRAME_MS, _DIST_TRANSITION_MS, "linear")
-GTM_PLAY_PAUSE_SCRIPT: str = make_play_pause_script(_GTM_FRAME_MS, _GTM_TRANSITION_MS, "circle")
+DIST_PLAY_PAUSE_SCRIPT: str = make_play_pause_script(_DIST_FRAME_MS, _DIST_TRANSITION_MS, "linear", redraw=True)
+GTM_PLAY_PAUSE_SCRIPT: str = make_play_pause_script(_GTM_FRAME_MS, _GTM_TRANSITION_MS, "circle", redraw=False)
 
 
 def write_html_both(
@@ -200,11 +206,12 @@ def write_html_both(
         the DOM play/pause toggle button for animated figures.
     """
     path = Path(path)
-    kwargs: dict = dict(auto_play=auto_play)
+    div_id = str(uuid.uuid4())
+    kwargs: dict = dict(auto_play=auto_play, div_id=div_id)
     if animation_opts is not None:
         kwargs["animation_opts"] = animation_opts
     if post_script is not None:
-        kwargs["post_script"] = post_script
+        kwargs["post_script"] = post_script.replace("__DIV_ID__", div_id)
 
     fig.write_html(str(path), include_plotlyjs=True, **kwargs)
 
