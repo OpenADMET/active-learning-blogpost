@@ -208,22 +208,23 @@ def write_html_both(
     path = Path(path)
     div_id = str(uuid.uuid4())
 
-    # JS injected via post_script: directly override the inline style Plotly
-    # hard-codes on the div, cap width at the designed size, center it, then
-    # trigger a resize so Plotly re-renders at the corrected dimensions.
-    # CSS !important alone is insufficient because Plotly's ResizeObserver can
-    # restore fixed pixel values via element.style assignments after the fact.
+    # JS injected via post_script: wrap the figure in a centering container
+    # so Ghost's content column controls the available width.  After wrapping,
+    # Plotly.relayout({autosize:true}) re-renders using gd.parentNode.clientWidth
+    # (the wrapper), which correctly shrinks on narrow viewports.  This avoids
+    # the fight with Plotly's inline style writes that reset any CSS !important
+    # or direct gd.style.width assignments back to a fixed pixel value.
     fig_width = fig.layout.width or 700
     centering_script = (
         "(function(){"
         f"var gd=document.getElementById('{div_id}');"
         "if(!gd)return;"
-        f"gd.style.maxWidth='{fig_width}px';"
+        "var w=document.createElement('div');"
+        f"w.style.cssText='max-width:{fig_width}px;width:100%;margin:0 auto;display:block;';"
+        "gd.parentNode.insertBefore(w,gd);"
+        "w.appendChild(gd);"
         "gd.style.width='100%';"
-        "gd.style.marginLeft='auto';"
-        "gd.style.marginRight='auto';"
-        "gd.style.display='block';"
-        "if(window.Plotly){Plotly.Plots.resize(gd);}"
+        "if(window.Plotly){Plotly.relayout(gd,{autosize:true});}"
         "})();"
     )
 
