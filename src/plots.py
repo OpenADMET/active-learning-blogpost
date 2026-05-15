@@ -208,23 +208,27 @@ def write_html_both(
     path = Path(path)
     div_id = str(uuid.uuid4())
 
-    # CSS injected via post_script: center the figure div, cap it at its
-    # designed pixel width, and prevent overflow into narrow CMS columns (e.g.
-    # Ghost).  responsive:True (in config) still lets it shrink below that cap.
+    # JS injected via post_script: directly override the inline style Plotly
+    # hard-codes on the div, cap width at the designed size, center it, then
+    # trigger a resize so Plotly re-renders at the corrected dimensions.
+    # CSS !important alone is insufficient because Plotly's ResizeObserver can
+    # restore fixed pixel values via element.style assignments after the fact.
     fig_width = fig.layout.width or 700
-    centering_css = (
+    centering_script = (
         "(function(){"
-        "var s=document.createElement('style');"
-        f"s.textContent='#{div_id}{{max-width:{fig_width}px!important;"
-        "width:100%!important;"
-        "margin-left:auto!important;margin-right:auto!important;"
-        "display:block!important;}';"
-        "document.head.appendChild(s);"
+        f"var gd=document.getElementById('{div_id}');"
+        "if(!gd)return;"
+        f"gd.style.maxWidth='{fig_width}px';"
+        "gd.style.width='100%';"
+        "gd.style.marginLeft='auto';"
+        "gd.style.marginRight='auto';"
+        "gd.style.display='block';"
+        "if(window.Plotly){Plotly.Plots.resize(gd);}"
         "})();"
     )
 
     user_script = post_script.replace("__DIV_ID__", div_id) if post_script is not None else None
-    combined_script = "\n".join(filter(None, [centering_css, user_script]))
+    combined_script = "\n".join(filter(None, [centering_script, user_script]))
 
     kwargs: dict = dict(
         auto_play=auto_play,
