@@ -208,23 +208,18 @@ def write_html_both(
     path = Path(path)
     div_id = str(uuid.uuid4())
 
-    # JS injected via post_script: wrap the figure in a centering container
-    # so Ghost's content column controls the available width.  After wrapping,
-    # Plotly.relayout({autosize:true}) re-renders using gd.parentNode.clientWidth
-    # (the wrapper), which correctly shrinks on narrow viewports.  This avoids
-    # the fight with Plotly's inline style writes that reset any CSS !important
-    # or direct gd.style.width assignments back to a fixed pixel value.
-    fig_width = fig.layout.width or 700
+    # JS injected via post_script: centre the figure at its designed size.
+    # Flexbox on the wrapper centres gd without touching gd.style.display,
+    # which Plotly's resize observer may otherwise overwrite.
     centering_script = (
         "(function(){"
         f"var gd=document.getElementById('{div_id}');"
         "if(!gd)return;"
         "var w=document.createElement('div');"
-        f"w.style.cssText='max-width:{fig_width}px;width:100%;margin:0 auto;display:block;';"
+        "w.style.cssText='display:flex;flex-direction:column;width:100%;';"
         "gd.parentNode.insertBefore(w,gd);"
         "w.appendChild(gd);"
-        "gd.style.width='100%';"
-        "if(window.Plotly){Plotly.relayout(gd,{autosize:true});}"
+        "gd.style.alignSelf='center';"
         "})();"
     )
 

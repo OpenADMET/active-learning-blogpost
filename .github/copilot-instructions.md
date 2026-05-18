@@ -2,7 +2,7 @@
 
 ## Project overview
 
-This repository is a tutorial/blogpost benchmarking **active learning with query-by-committee** for molecular potency prediction in drug discovery. Two targets are studied: PXR (pregnane X receptor, pEC50) and ASAP SARS-CoV-2 Mpro (pIC50). The primary artifact is `blogpost.md`. All executable code lives in `src/`, with two entry points at the repository root.
+This repository is a tutorial/blogpost benchmarking **active learning with query-by-committee** for molecular potency prediction in drug discovery. Two targets are studied: PXR (pregnane X receptor, pEC50) and ASAP SARS-CoV-2 Mpro (pIC50). The primary artifact is `blogpost.md`. All executable code lives in `src/`, with six entry points at the repository root.
 
 ## Domain context
 
@@ -171,14 +171,19 @@ Constants exported: `STRATEGIES`, `STRATEGY_COLORS`, `STRATEGY_QUERY_KEYS`.
 
 | Function | Output |
 |---|---|
+| `make_play_pause_script(...)` | Generate a JS play/pause inject script for animated HTML exports |
+| `write_html_both(...)` | Write an HTML file in both self-contained (embedded) and CDN variants |
 | `plot_learning_curve_with_bands(...)` | Plotly line plot with ±1σ shading per strategy |
 | `plot_learning_curve_grid(...)` | Multi-panel grid of learning curves (M rows × N cols) |
 | `plot_hit_discovery_curve(...)` | Cumulative hits found vs. labeled pool size |
 | `plot_hit_discovery_curve_grid(...)` | Multi-panel grid of hit discovery curves |
+| `plot_hit_nonhit_gap_curve(...)` | Predicted-score gap between hit and non-hit compounds vs. labeled pool size |
 | `plot_calibration_curve_before_after(...)` | Before/after calibration curves |
 | `plot_calibration_area_per_iteration(...)` | Miscalibration area (pre- and post-calibration) vs. iteration |
 | `plot_sigma_error_correlation(...)` | Spearman ρ(σ, \|error\|) vs. labeled pool size |
 | `plot_gtm_selection_animation(...)` | Animated Plotly scatter on GTM embedding |
+| `plot_predicted_distribution_animation(...)` | Animated KDE of predicted scores (hit vs. non-hit, test set) |
+| `plot_mirror_distribution_animation(...)` | Side-by-side animated KDE: ChemProp (top) vs. CheMeleon (bottom) |
 | `plot_tmap_faerun(...)` | Interactive Faerun/TMAP HTML scatter colored by AL iteration |
 | `plot_tmap_faerun_strategies(...)` | Interactive Faerun/TMAP HTML with per-strategy selection overlays |
 | `plot_tmap_faerun_partition(...)` | Interactive Faerun/TMAP HTML colored by train/test partition |

@@ -200,6 +200,14 @@ All outputs are written to `results_path` specified in the config:
 | `tmap_selection.html` | Interactive TMAP (Faerun) colored by AL iteration |
 | `tmap_partition.html/.svg` | TMAP colored by train/test partition |
 | `calibration_curve.html/.svg` | Before/after uncertainty calibration curves |
+| `predicted_distribution_{strategy}.html` | Animated KDE of predicted scores (hit vs. non-hit, test set) — one per strategy |
+
+**Cross-config outputs** (written by `analysis_combined.py --output-dir <dir>`):
+
+| File | Description |
+|---|---|
+| `hit_nonhit_gap_Exploitation.html/.svg` | Hit/non-hit predicted-score gap vs. labeled pool size (all configs) |
+| `{target}_mirror_distribution_Exploitation.html` | Animated side-by-side KDE: ChemProp (top) vs. CheMeleon (bottom) |
 
 ---
 

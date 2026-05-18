@@ -258,6 +258,7 @@ class SyntheticOracle:
         k_iter: int,
         seed: int = 42,
     ) -> None:
+        """Initialize the oracle with the full ground-truth label map and config."""
         self.smiles_to_y = smiles_to_y
         self.oracle_cfg = oracle_cfg
         self.k_iter = max(k_iter, 1)
@@ -477,6 +478,7 @@ class CachedPredOracle:
         k_iter: int,
         seed: int = 42,
     ) -> None:
+        """Initialize the oracle with a prediction cache and the ground-truth label map."""
         self.smiles_to_y = smiles_to_y
         self.oracle_cfg = oracle_cfg
         self.k_iter = max(k_iter, 1)
@@ -657,7 +659,7 @@ def _expected_improvement(
     best_y: float,
     xi: float = 0.01,
 ) -> np.ndarray:
-    """Expected improvement acquisition scores."""
+    """Compute expected improvement acquisition scores."""
     z = (mean - best_y - xi) / np.maximum(std, 1e-9)
     return (mean - best_y - xi) * norm.cdf(z) + std * norm.pdf(z)
 

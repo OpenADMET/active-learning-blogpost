@@ -17,6 +17,24 @@ from scipy.stats import spearmanr
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def load_metric(results_dir, strategy, metric, target_n):
+    """Load a scalar metric at a target labeled-pool size across all seeds.
+
+    Parameters
+    ----------
+    results_dir : str
+        Path to a results directory containing run_*.pkl files.
+    strategy : str
+        Acquisition strategy name (e.g. ``"EI"``, ``"Exploitation"``).
+    metric : str
+        Key to extract from each history step dict (e.g. ``"mae_test"``).
+    target_n : int
+        Target ``n_labeled`` value; the closest step is selected per seed.
+
+    Returns
+    -------
+    np.ndarray
+        1-D array of metric values, one per seed file found.
+    """
     split = "predefined" if "asap" in results_dir else "random"
     vals = []
     for f in sorted(glob.glob(f"{results_dir}/run_{split}_{strategy}_seed*.pkl")):
@@ -50,6 +68,19 @@ def load_sigma_rho(results_dir, strategy, target_n):
 
 
 def report(label, a, b, paired=True):
+    """Print a t-test comparison between two arrays of metric values.
+
+    Parameters
+    ----------
+    label : str
+        Human-readable description of the comparison printed as a header.
+    a : np.ndarray
+        Metric values for condition A (one value per seed).
+    b : np.ndarray
+        Metric values for condition B (one value per seed).
+    paired : bool, optional
+        If ``True`` (default), use a paired t-test; otherwise unpaired.
+    """
     t, p = stats.ttest_rel(a, b) if paired else stats.ttest_ind(a, b)
     sig = "SIGNIFICANT *" if p < 0.05 else "not significant"
     print(f"\n{'─'*60}")
