@@ -194,17 +194,6 @@ def main(
 
     Comparisons are made three ways per reference file: raw SMILES string,
     RDKit canonical SMILES, and InChIKey.
-
-    Parameters
-    ----------
-    query : str
-        Path to the query CSV file (validated by Click to exist).
-    query_smiles_col : str
-        Name of the SMILES column in the query CSV.
-    refs : tuple[str, ...]
-        One or more ``path[:smiles_col]`` tokens for reference files.
-        Parsed by :func:`_parse_ref`; SMILES column defaults to
-        ``"SMILES"`` when the colon suffix is absent.
     """
     reference_files = [
         {"path": p, "smiles_col": col, "label": os.path.basename(p)}
