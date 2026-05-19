@@ -94,22 +94,24 @@ def load_smiles_col(path: str, smiles_col: str) -> list[str]:
     return rows
 
 
-def build_lookup(smiles_list: list[str]) -> dict[str, set[str]]:
-    """Build three membership sets from a list of SMILES strings.
+def build_lookup(smiles_list: list[str]) -> dict[str, dict[str, list[int]]]:
+    """Build three lookup dicts from a list of SMILES strings.
 
     SMILES that cannot be parsed by RDKit produce ``None`` from the
     toolkit functions and are silently excluded from the canonical and
-    InChIKey sets (they remain in the raw set).
+    InChIKey dicts (they remain in the raw dict).
 
     Parameters
     ----------
     smiles_list : list[str]
-        Input SMILES, as loaded from a CSV column.
+        Input SMILES, as loaded from a CSV column (1-based row order).
 
     Returns
     -------
-    dict[str, set[str]]
-        Mapping with three keys:
+    dict[str, dict[str, list[int]]]
+        Mapping with three keys, each holding a dict from the SMILES
+        representation to a list of 1-based data row numbers where it
+        appears:
 
         ``"raw"``
             As-is SMILES strings (exact string match).
@@ -118,17 +120,17 @@ def build_lookup(smiles_list: list[str]) -> dict[str, set[str]]:
         ``"inchikey"``
             IUPAC InChIKey (representation-independent identity check).
     """
-    raw: set[str] = set()
-    can: set[str] = set()
-    ik: set[str] = set()
-    for smi in smiles_list:
-        raw.add(smi)
+    raw: dict[str, list[int]] = {}
+    can: dict[str, list[int]] = {}
+    ik: dict[str, list[int]] = {}
+    for row_num, smi in enumerate(smiles_list, start=1):
+        raw.setdefault(smi, []).append(row_num)
         c = canonical_smiles(smi)
         if c:
-            can.add(c)
+            can.setdefault(c, []).append(row_num)
         k = smiles_to_inchikey(smi)
         if k:
-            ik.add(k)
+            ik.setdefault(k, []).append(row_num)
     return {"raw": raw, "canonical": can, "inchikey": ik}
 
 
@@ -213,17 +215,19 @@ def main(
     console.rule("[bold cyan]Load query set[/]")
     console.print(f"  Reading [bold]{query}[/] (col: [italic]{query_smiles_col}[/]) ...")
     query_smiles: list[str] = []
+    query_row_nums: list[int] = []
     with open(query, newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
-        for row in reader:
+        for row_num, row in enumerate(reader, start=1):
             smi = row.get(query_smiles_col, "").strip()
             if smi:
                 query_smiles.append(smi)
+                query_row_nums.append(row_num)
     console.print(f"  Loaded [bold]{len(query_smiles)}[/] compounds.\n")
 
     # ---- phase 2: build reference lookups ----
     console.rule("[bold cyan]Build reference lookup sets (raw / canonical / InChIKey)[/]")
-    ref_lookups: dict[str, dict[str, set[str]]] = {}
+    ref_lookups: dict[str, dict[str, dict[str, list[int]]]] = {}
     for ref in reference_files:
         console.print(f"  Processing [bold]{ref['label']}[/] (col: [italic]{ref['smiles_col']}[/]) ...")
         smiles_list = load_smiles_col(ref["path"], ref["smiles_col"])
@@ -260,26 +264,30 @@ def main(
     # ---- phase 4: run overlap checks ----
     console.rule("[bold cyan]Check query compounds against each reference file[/]")
 
-    # hits: (raw_smiles, ref_label, method)
-    hits: list[tuple[str, str, str]] = []
+    # hits: (query_row, raw_smiles, ref_label, ref_rows_str, method)
+    hits: list[tuple[int, str, str, str, str]] = []
     for i, smi_raw in enumerate(query_smiles):
         smi_can = query_can[i]
         smi_ik = query_ik[i]
+        q_row = query_row_nums[i]
         for ref in reference_files:
             lkp = ref_lookups[ref["label"]]
             if smi_raw in lkp["raw"]:
-                hits.append((smi_raw, ref["label"], "raw"))
+                ref_rows = ", ".join(str(r) for r in lkp["raw"][smi_raw])
+                hits.append((q_row, smi_raw, ref["label"], ref_rows, "raw"))
             if smi_can and smi_can in lkp["canonical"]:
-                hits.append((smi_raw, ref["label"], "canonical"))
+                ref_rows = ", ".join(str(r) for r in lkp["canonical"][smi_can])
+                hits.append((q_row, smi_raw, ref["label"], ref_rows, "canonical"))
             if smi_ik and smi_ik in lkp["inchikey"]:
-                hits.append((smi_raw, ref["label"], "inchikey"))
+                ref_rows = ", ".join(str(r) for r in lkp["inchikey"][smi_ik])
+                hits.append((q_row, smi_raw, ref["label"], ref_rows, "inchikey"))
 
     unique_hits = sorted(set(hits))
 
     for ref in reference_files:
         console.print(f"\n  Reference: [bold]{ref['label']}[/]")
         for method in ("raw", "canonical", "inchikey"):
-            n = sum(1 for h in unique_hits if h[1] == ref["label"] and h[2] == method)
+            n = sum(1 for h in unique_hits if h[2] == ref["label"] and h[4] == method)
             _check(f"  vs {ref['label']}  \\[{method}]", n)
     console.print()
 
@@ -289,29 +297,40 @@ def main(
     if not unique_hits:
         console.print("\n  [bold green]✓  OVERALL PASS — no overlap detected by any method.[/]\n")
     else:
-        by_smiles: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
-        for h in unique_hits:
-            by_smiles[h[0]].append(h)
+        # Group: ref_label → (query_row, smiles) → [(ref_rows_str, method)]
+        by_ref: dict[str, dict[tuple[int, str], list[tuple[str, str]]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        for q_row, smi_hit, ref_label, ref_rows_str, method in unique_hits:
+            by_ref[ref_label][(q_row, smi_hit)].append((ref_rows_str, method))
 
+        n_compounds = len({h[1] for h in unique_hits})
         console.print(
             f"\n  [bold red]✗  OVERALL FAIL — {len(unique_hits)} hit(s) across "
-            f"{len(by_smiles)} unique compound(s).[/]\n"
+            f"{n_compounds} unique compound(s).[/]\n"
         )
         tbl = Table(box=box.SIMPLE, show_header=True, header_style="bold magenta")
-        tbl.add_column("Method", style="cyan", no_wrap=True)
-        tbl.add_column("Reference file", style="yellow")
+        tbl.add_column("Reference", style="yellow", no_wrap=True)
+        tbl.add_column("Query row", style="dim", no_wrap=True, justify="right")
         tbl.add_column("SMILES")
-        for smi, compound_hits in sorted(by_smiles.items()):
-            for smi_hit, ref_label, method in compound_hits:
-                tbl.add_row(method, ref_label, smi_hit[:80])
+        tbl.add_column("Ref row(s)", style="dim", no_wrap=True, justify="right")
+        tbl.add_column("Method", style="cyan", no_wrap=True)
+        for ref_label, compound_map in sorted(by_ref.items()):
+            first_ref = True
+            for (q_row, smi_hit), rows_methods in sorted(compound_map.items()):
+                first_smi = True
+                for ref_rows_str, method in rows_methods:
+                    tbl.add_row(
+                        ref_label if first_ref and first_smi else "",
+                        str(q_row) if first_smi else "",
+                        smi_hit[:72] if first_smi else "",
+                        ref_rows_str,
+                        method,
+                    )
+                    first_smi = False
+                    first_ref = False
         console.print(tbl)
 
-    console.rule()
-    console.print(
-        f"  [dim]{len(query_smiles)} query compounds × "
-        f"{len(reference_files)} reference files × 3 methods = "
-        f"{len(query_smiles) * len(reference_files) * 3} individual checks performed.[/]"
-    )
     console.rule()
 
 
