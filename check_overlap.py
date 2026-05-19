@@ -5,6 +5,9 @@ Three comparison modes per compound × per reference file:
   - canonical: RDKit canonical SMILES
   - inchikey : InChIKey derived from SMILES
 
+Both the query and reference files use ``path[:smiles_col]`` notation.
+If ``:smiles_col`` is omitted, ``SMILES`` is used by default.
+
 Usage examples::
 
     # minimal — SMILES column defaults to "SMILES" for all files
@@ -13,10 +16,9 @@ Usage examples::
         --ref data/pxr_challenge_train.csv \\
         --ref data/chembl.csv
 
-    # override SMILES column per reference using path:col syntax
+    # override SMILES column per file using path:col syntax
     python check_overlap.py \\
-        --query data/pxr-challenge_TEST_BLINDED.csv \\
-        --query-smiles-col SMILES \\
+        --query "data/pxr-challenge_TEST_BLINDED.csv:SMILES" \\
         --ref data/pxr_challenge_train.csv \\
         --ref data/chembl.csv \\
         --ref "data/asap_potency.csv:CXSMILES"
@@ -164,14 +166,10 @@ def _check(label: str, n_hits: int) -> None:
     "--query",
     "-q",
     required=True,
-    type=click.Path(exists=True, dir_okay=False),
-    help="Path to the query CSV file.",
-)
-@click.option(
-    "--query-smiles-col",
-    default="SMILES",
-    show_default=True,
-    help="SMILES column name in the query CSV.",
+    help=(
+        "Query CSV file. Optionally append the SMILES column name after a colon: "
+        "path/to/file.csv:SMILES_COL  (default column: SMILES)."
+    ),
 )
 @click.option(
     "--ref",
@@ -187,7 +185,6 @@ def _check(label: str, n_hits: int) -> None:
 )
 def main(
     query: str,
-    query_smiles_col: str,
     refs: tuple[str, ...],
 ) -> None:
     """Check a query CSV for compound overlap against one or more reference CSVs.
@@ -195,6 +192,10 @@ def main(
     Comparisons are made three ways per reference file: raw SMILES string,
     RDKit canonical SMILES, and InChIKey.
     """
+    query_path, query_smiles_col = _parse_ref(query)
+    if not os.path.isfile(query_path):
+        raise click.BadParameter(f"File not found: {query_path}", param_hint="'--query'")
+
     reference_files = [
         {"path": p, "smiles_col": col, "label": os.path.basename(p)}
         for p, col in (_parse_ref(r) for r in refs)
@@ -202,10 +203,10 @@ def main(
 
     # ---- phase 1: load query set ----
     console.rule("[bold cyan]Load query set[/]")
-    console.print(f"  Reading [bold]{query}[/] (col: [italic]{query_smiles_col}[/]) ...")
+    console.print(f"  Reading [bold]{query_path}[/] (col: [italic]{query_smiles_col}[/]) ...")
     query_smiles: list[str] = []
     query_row_nums: list[int] = []
-    with open(query, newline="", encoding="utf-8") as fh:
+    with open(query_path, newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         for row_num, row in enumerate(reader, start=1):
             smi = row.get(query_smiles_col, "").strip()
